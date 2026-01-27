@@ -6,7 +6,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Multer config (memory storage)
+// Multer config
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -23,20 +23,38 @@ app.get("/", (req, res) => {
   });
 });
 
-// 🔥 UPLOAD ENDPOINT
+// UPLOAD endpoint
 app.post("/upload", upload.single("file"), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({
+  try {
+    if (!req.file) {
+      return res.status(400).json({
+        status: "error",
+        message: "No file uploaded"
+      });
+    }
+
+    res.json({
+      status: "ok",
+      filename: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    });
+
+  } catch (err) {
+    console.error("UPLOAD ERROR:", err);
+    res.status(500).json({
       status: "error",
-      message: "No file uploaded"
+      message: "Upload failed"
     });
   }
+});
 
-  res.json({
-    status: "ok",
-    filename: req.file.originalname,
-    mimetype: req.file.mimetype,
-    size: req.file.size
+// GLOBAL error handler (ВАЖНО)
+app.use((err, req, res, next) => {
+  console.error("GLOBAL ERROR:", err);
+  res.status(500).json({
+    status: "error",
+    message: "Server error"
   });
 });
 
