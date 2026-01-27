@@ -6,11 +6,11 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Multer: сохраняем файл в память (RAM)
+// Multer config (memory storage)
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 50 * 1024 * 1024 // 50 MB
+    fileSize: 50 * 1024 * 1024 // 50MB
   }
 });
 
@@ -23,7 +23,7 @@ app.get("/", (req, res) => {
   });
 });
 
-// 🔥 POST /upload — PHASE 1
+// 🔥 UPLOAD ENDPOINT
 app.post("/upload", upload.single("file"), (req, res) => {
   if (!req.file) {
     return res.status(400).json({
@@ -36,11 +36,11 @@ app.post("/upload", upload.single("file"), (req, res) => {
     status: "success",
     filename: req.file.originalname,
     mimetype: req.file.mimetype,
-    size: req.file.size,
-    message: "File uploaded successfully (stored in memory)"
+    size: req.file.size
   });
 });
 
+// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Realife backend running on port ${PORT}`);
