@@ -33,7 +33,7 @@ app.post("/upload", upload.single("file"), (req, res) => {
   }
 
   res.json({
-    status: "success",
+    status: "ok",
     filename: req.file.originalname,
     mimetype: req.file.mimetype,
     size: req.file.size
