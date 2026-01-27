@@ -1,6 +1,7 @@
 {
   "name": "realife-backend",
   "version": "1.0.0",
+  "description": "Realife backend – upload & NFT preparation",
   "main": "index.js",
   "type": "module",
   "scripts": {
