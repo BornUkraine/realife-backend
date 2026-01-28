@@ -13,7 +13,7 @@ app.use(cors());
 app.use(express.json());
 
 /* =========================
-   MULTER (memory)
+   MULTER (memory storage)
 ========================= */
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -90,7 +90,66 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 });
 
 /* =========================
-   START SERVER
+   METADATA → IPFS (PINATA)
+========================= */
+app.post("/metadata", async (req, res) => {
+  try {
+    const { name, description, image, attributes } = req.body;
+
+    if (!name || !image) {
+      return res.status(400).json({
+        status: "error",
+        message: "name and image are required"
+      });
+    }
+
+    if (!process.env.PINATA_JWT) {
+      return res.status(500).json({
+        status: "error",
+        message: "PINATA_JWT is missing"
+      });
+    }
+
+    const metadata = {
+      name,
+      description: description || "",
+      image,
+      attributes: attributes || []
+    };
+
+    const pinataResponse = await axios.post(
+      "https://api.pinata.cloud/pinning/pinJSONToIPFS",
+      metadata,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PINATA_JWT}`,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    const cid = pinataResponse.data.IpfsHash;
+
+    res.json({
+      status: "ok",
+      cid,
+      tokenURI: `ipfs://${cid}`,
+      gateway: `https://gateway.pinata.cloud/ipfs/${cid}`,
+      metadata
+    });
+
+  } catch (error) {
+    console.error("METADATA ERROR:", error.response?.data || error.message);
+
+    res.status(500).json({
+      status: "error",
+      message: "Metadata upload failed"
+    });
+  }
+});
+
+/* =========================
+   START SERVER (ALWAYS LAST)
 ========================= */
 const PORT = process.env.PORT || 3000;
 
