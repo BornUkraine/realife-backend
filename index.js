@@ -149,6 +149,32 @@ app.post("/metadata", async (req, res) => {
 });
 
 /* =========================
+   DYNAMIC NFT METADATA
+========================= */
+app.get("/metadata/:tokenId", async (req, res) => {
+  try {
+    const { tokenId } = req.params;
+
+    const dynamicMetadata = {
+      name: `Realife #${tokenId}`,
+      description: `Real-life work tokenized on Realife. Token ID: ${tokenId}`,
+      image: "ipfs://QmZCppQHC9u1fsWrLk4D2hVJz1hFJwbToqPwwC96auRVR",
+      attributes: [
+        { trait_type: "Platform", value: "Realife" },
+        { trait_type: "Token ID", value: tokenId },
+        { trait_type: "Updated At", value: new Date().toISOString() }
+      ]
+    };
+
+    res.json(dynamicMetadata);
+
+  } catch (error) {
+    console.error("DYNAMIC METADATA ERROR:", error.message);
+    res.status(500).json({ status: "error" });
+  }
+});
+
+/* =========================
    START SERVER (ALWAYS LAST)
 ========================= */
 const PORT = process.env.PORT || 3000;
