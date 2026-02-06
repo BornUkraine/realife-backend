@@ -192,6 +192,11 @@ app.post("/metadata", async (req, res) => {
 ========================= */
 app.get("/metadata/:tokenId", async (req, res) => {
   try {
+
+    res.set({
+      "Cache-Control": "public, max-age=60, s-maxage=60, must-revalidate"
+    });
+
     const tokenId = BigInt(req.params.tokenId);
     const contract = process.env.REALIFE_CONTRACT;
 
@@ -246,14 +251,18 @@ app.get("/metadata/:tokenId", async (req, res) => {
     }
 
     // 3️⃣ balanceOf
-    const balance = await client.readContract({
+      const balance = await client.readContract({
       address: contract,
       abi: ABI,
       functionName: "balanceOf",
       args: [owner]
     });
 
-    // 4️⃣ block timestamp
+    // 4️⃣ Reputation score (capped)
+    const reputationScore = Math.min(Number(balance), 100);
+
+
+    // 5️⃣ block timestamp
     const block = await client.getBlock();
 
     const attributes = [
@@ -280,6 +289,12 @@ app.get("/metadata/:tokenId", async (req, res) => {
     } else {
       attributes.push({ trait_type: "Reputation", value: "New" });
     }
+    // 🔢 Reputation Score (numeric, for sorting & future UI)
+      attributes.push({
+      trait_type: "Reputation Score",
+      value: reputationScore,
+      display_type: "number"
+    });
 
     // ✅ FINAL RESPONSE
     return res.json({
