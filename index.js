@@ -6,6 +6,34 @@ import FormData from "form-data";
 import { createPublicClient, http } from "viem";
 import { baseSepolia } from "viem/chains";
 
+/* =========================
+   ABI (READ-ONLY)
+========================= */
+const ABI = [
+  {
+    type: "function",
+    name: "ownerOf",
+    stateMutability: "view",
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    outputs: [{ type: "address" }]
+  },
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ type: "uint256" }]
+  }
+];
+
+/* =========================
+   BLOCKCHAIN CLIENT
+========================= */
+const client = createPublicClient({
+  chain: baseSepolia,
+  transport: http(process.env.RPC_URL)
+});
+
 const app = express();
 
 /* =========================
@@ -13,6 +41,7 @@ const app = express();
 ========================= */
 app.use(cors());
 app.use(express.json());
+
 
 /* =========================
    MULTER (memory storage)
@@ -151,30 +180,73 @@ app.post("/metadata", async (req, res) => {
 });
 
 /* =========================
-   DYNAMIC NFT METADATA
+   DYNAMIC NFT METADATA (ONCHAIN)
 ========================= */
 app.get("/metadata/:tokenId", async (req, res) => {
   try {
-    const { tokenId } = req.params;
+    const tokenId = BigInt(req.params.tokenId);
+    const contract = process.env.REALIFE_CONTRACT;
 
-    const dynamicMetadata = {
+    // 1️⃣ ownerOf
+    const owner = await client.readContract({
+      address: contract,
+      abi: ABI,
+      functionName: "ownerOf",
+      args: [tokenId]
+    });
+
+    // 2️⃣ balanceOf
+    const balance = await client.readContract({
+      address: contract,
+      abi: ABI,
+      functionName: "balanceOf",
+      args: [owner]
+    });
+
+    // 3️⃣ latest block
+    const block = await client.getBlock();
+
+    const attributes = [
+      { trait_type: "Platform", value: "Realife" },
+      { trait_type: "Token ID", value: tokenId.toString() },
+      { trait_type: "Owner", value: owner },
+      { trait_type: "Owned NFTs", value: balance.toString() },
+      {
+        trait_type: "Last Updated",
+        value: new Date(Number(block.timestamp) * 1000).toISOString()
+      }
+    ];
+
+    // 🟢 Verified Creator
+    if (balance >= 3n) {
+      attributes.push({
+        trait_type: "Verified Creator",
+        value: "Yes"
+      });
+    }
+
+    // 🟣 Reputation tier
+    if (balance >= 5n) {
+      attributes.push({ trait_type: "Reputation", value: "High" });
+    } else if (balance >= 2n) {
+      attributes.push({ trait_type: "Reputation", value: "Medium" });
+    } else {
+      attributes.push({ trait_type: "Reputation", value: "New" });
+    }
+
+    res.json({
       name: `Realife #${tokenId}`,
-      description: `Real-life work tokenized on Realife. Token ID: ${tokenId}`,
+      description: "Real-life work tokenized on Realife",
       image: "ipfs://QmZCppQHC9u1fsWrLk4D2hVJz1hFJwbToqPwwC96auRVR",
-      attributes: [
-        { trait_type: "Platform", value: "Realife" },
-        { trait_type: "Token ID", value: tokenId },
-        { trait_type: "Updated At", value: new Date().toISOString() }
-      ]
-    };
+      attributes
+    });
 
-    res.json(dynamicMetadata);
-
-  } catch (error) {
-    console.error("DYNAMIC METADATA ERROR:", error.message);
+  } catch (err) {
+    console.error("ONCHAIN METADATA ERROR:", err);
     res.status(500).json({ status: "error" });
   }
 });
+
 
 /* =========================
    START SERVER (ALWAYS LAST)
