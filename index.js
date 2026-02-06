@@ -221,10 +221,10 @@ app.get("/metadata/:tokenId", async (req, res) => {
       });
     }
 
-    // 2️⃣ tokenURI → metadata → image
+      // 2️⃣ tokenURI → metadata → image / name / description
     let image = null;
-    let name = `Realife #${tokenId}`;
-    let description = "Real-life work tokenized on Realife";
+    let name = null;
+    let description = null;
 
     try {
       const tokenUri = await client.readContract({
@@ -243,12 +243,13 @@ app.get("/metadata/:tokenId", async (req, res) => {
         const originalMetadata = await axios.get(metadataUrl);
 
         image = originalMetadata.data.image ?? null;
-        name = originalMetadata.data.name ?? name;
-        description = originalMetadata.data.description ?? description;
+        name = originalMetadata.data.name ?? null;
+        description = originalMetadata.data.description ?? null;
       }
     } catch {
       console.warn("Metadata fetch failed, fallback used");
     }
+
 
     // 3️⃣ balanceOf
       const balance = await client.readContract({
