@@ -180,20 +180,33 @@ app.post("/metadata", async (req, res) => {
 });
 
 /* =========================
-   DYNAMIC NFT METADATA (ONCHAIN)
+   DYNAMIC NFT METADATA (ONCHAIN + SAFE)
 ========================= */
 app.get("/metadata/:tokenId", async (req, res) => {
   try {
     const tokenId = BigInt(req.params.tokenId);
     const contract = process.env.REALIFE_CONTRACT;
 
-    // 1️⃣ ownerOf
-    const owner = await client.readContract({
-      address: contract,
-      abi: ABI,
-      functionName: "ownerOf",
-      args: [tokenId]
-    });
+    let owner;
+
+    // 1️⃣ SAFE ownerOf
+    try {
+      owner = await client.readContract({
+        address: contract,
+        abi: ABI,
+        functionName: "ownerOf",
+        args: [tokenId]
+      });
+    } catch {
+      return res.json({
+        name: `Realife #${tokenId}`,
+        description: "Unminted Realife NFT",
+        image: "ipfs://QmZCppQHC9u1fsWrLk4D2hVJz1hFJwbToqPwwC96auRVR",
+        attributes: [
+          { trait_type: "Status", value: "Not minted" }
+        ]
+      });
+    }
 
     // 2️⃣ balanceOf
     const balance = await client.readContract({
@@ -203,7 +216,7 @@ app.get("/metadata/:tokenId", async (req, res) => {
       args: [owner]
     });
 
-    // 3️⃣ latest block
+    // 3️⃣ block timestamp
     const block = await client.getBlock();
 
     const attributes = [
@@ -246,6 +259,8 @@ app.get("/metadata/:tokenId", async (req, res) => {
     res.status(500).json({ status: "error" });
   }
 });
+
+
 
 
 /* =========================
