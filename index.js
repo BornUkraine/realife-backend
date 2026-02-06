@@ -3,6 +3,8 @@ import cors from "cors";
 import multer from "multer";
 import axios from "axios";
 import FormData from "form-data";
+import { createPublicClient, http } from "viem";
+import { baseSepolia } from "viem/chains";
 
 const app = express();
 
