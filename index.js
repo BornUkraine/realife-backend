@@ -23,8 +23,16 @@ const ABI = [
     stateMutability: "view",
     inputs: [{ name: "owner", type: "address" }],
     outputs: [{ type: "uint256" }]
+  },
+  {
+    type: "function",
+    name: "tokenURI",
+    stateMutability: "view",
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    outputs: [{ type: "string" }]
   }
 ];
+
 
 /* =========================
    BLOCKCHAIN CLIENT
@@ -180,7 +188,7 @@ app.post("/metadata", async (req, res) => {
 });
 
 /* =========================
-   DYNAMIC NFT METADATA (ONCHAIN + SAFE)
+   DYNAMIC NFT METADATA (ONCHAIN + IMAGE FROM MINT)
 ========================= */
 app.get("/metadata/:tokenId", async (req, res) => {
   try {
@@ -201,14 +209,43 @@ app.get("/metadata/:tokenId", async (req, res) => {
       return res.json({
         name: `Realife #${tokenId}`,
         description: "Unminted Realife NFT",
-        image: "ipfs://QmZCppQHC9u1fsWrLk4D2hVJz1hFJwbToqPwwC96auRVR",
+        image: null,
         attributes: [
           { trait_type: "Status", value: "Not minted" }
         ]
       });
     }
 
-    // 2️⃣ balanceOf
+    // 2️⃣ tokenURI → metadata → image
+    let image = null;
+    let name = `Realife #${tokenId}`;
+    let description = "Real-life work tokenized on Realife";
+
+    try {
+      const tokenUri = await client.readContract({
+        address: contract,
+        abi: ABI,
+        functionName: "tokenURI",
+        args: [tokenId]
+      });
+
+      if (tokenUri?.startsWith("ipfs://")) {
+        const metadataUrl = tokenUri.replace(
+          "ipfs://",
+          "https://gateway.pinata.cloud/ipfs/"
+        );
+
+        const originalMetadata = await axios.get(metadataUrl);
+
+        image = originalMetadata.data.image ?? null;
+        name = originalMetadata.data.name ?? name;
+        description = originalMetadata.data.description ?? description;
+      }
+    } catch {
+      console.warn("Metadata fetch failed, fallback used");
+    }
+
+    // 3️⃣ balanceOf
     const balance = await client.readContract({
       address: contract,
       abi: ABI,
@@ -216,7 +253,7 @@ app.get("/metadata/:tokenId", async (req, res) => {
       args: [owner]
     });
 
-    // 3️⃣ block timestamp
+    // 4️⃣ block timestamp
     const block = await client.getBlock();
 
     const attributes = [
@@ -232,10 +269,7 @@ app.get("/metadata/:tokenId", async (req, res) => {
 
     // 🟢 Verified Creator
     if (balance >= 3n) {
-      attributes.push({
-        trait_type: "Verified Creator",
-        value: "Yes"
-      });
+      attributes.push({ trait_type: "Verified Creator", value: "Yes" });
     }
 
     // 🟣 Reputation tier
@@ -247,16 +281,17 @@ app.get("/metadata/:tokenId", async (req, res) => {
       attributes.push({ trait_type: "Reputation", value: "New" });
     }
 
-    res.json({
-      name: `Realife #${tokenId}`,
-      description: "Real-life work tokenized on Realife",
-      image: "ipfs://QmZCppQHC9u1fsWrLk4D2hVJz1hFJwbToqPwwC96auRVR",
+    // ✅ FINAL RESPONSE
+    return res.json({
+      name,
+      description,
+      image,
       attributes
     });
 
   } catch (err) {
     console.error("ONCHAIN METADATA ERROR:", err);
-    res.status(500).json({ status: "error" });
+    return res.status(500).json({ status: "error" });
   }
 });
 
