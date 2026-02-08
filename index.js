@@ -73,14 +73,23 @@ app.get("/", (req, res) => {
 });
 
 /* =========================
-   UPLOAD → IPFS (PINATA)
+   MINT PREPARE (UPLOAD + METADATA)
 ========================= */
-app.post("/upload", upload.single("file"), async (req, res) => {
+app.post("/api/mint/prepare", upload.single("file"), async (req, res) => {
   try {
-    if (!req.file) {
+    const {
+      name,
+      description,
+      category,
+      project,
+      supply,
+      proofUrl
+    } = req.body;
+
+    if (!name || !req.file) {
       return res.status(400).json({
         status: "error",
-        message: "No file uploaded"
+        message: "Name and file are required"
       });
     }
 
@@ -91,72 +100,39 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       });
     }
 
-    const formData = new FormData();
-    formData.append("file", req.file.buffer, req.file.originalname);
+    /* ========= 1️⃣ Upload FILE to IPFS ========= */
+    const fileForm = new FormData();
+    fileForm.append("file", req.file.buffer, req.file.originalname);
 
-    const pinataResponse = await axios.post(
+    const fileUpload = await axios.post(
       "https://api.pinata.cloud/pinning/pinFileToIPFS",
-      formData,
+      fileForm,
       {
         maxBodyLength: Infinity,
         headers: {
-          ...formData.getHeaders(),
+          ...fileForm.getHeaders(),
           Authorization: `Bearer ${process.env.PINATA_JWT}`
         }
       }
     );
 
-    const cid = pinataResponse.data.IpfsHash;
+    const imageCid = fileUpload.data.IpfsHash;
+    const imageUri = `ipfs://${imageCid}`;
 
-    res.json({
-      status: "ok",
-      filename: req.file.originalname,
-      mimetype: req.file.mimetype,
-      size: req.file.size,
-      cid,
-      ipfs: `ipfs://${cid}`,
-      gateway: `https://gateway.pinata.cloud/ipfs/${cid}`
-    });
-
-  } catch (error) {
-    console.error("UPLOAD ERROR:", error.response?.data || error.message);
-
-    res.status(500).json({
-      status: "error",
-      message: "Upload to IPFS failed"
-    });
-  }
-});
-
-/* =========================
-   METADATA → IPFS (PINATA)
-========================= */
-app.post("/metadata", async (req, res) => {
-  try {
-    const { name, description, image, attributes } = req.body;
-
-    if (!name || !image) {
-      return res.status(400).json({
-        status: "error",
-        message: "name and image are required"
-      });
-    }
-
-    if (!process.env.PINATA_JWT) {
-      return res.status(500).json({
-        status: "error",
-        message: "PINATA_JWT is missing"
-      });
-    }
-
+    /* ========= 2️⃣ Build METADATA ========= */
     const metadata = {
       name,
       description: description || "",
-      image,
-      attributes: attributes || []
+      image: imageUri,
+      category: category || "Other",
+      project: project || "Realife",
+      supply: Number(supply) || 1,
+      proof: proofUrl || null,
+      attributes: []
     };
 
-    const pinataResponse = await axios.post(
+    /* ========= 3️⃣ Upload METADATA to IPFS ========= */
+    const metadataUpload = await axios.post(
       "https://api.pinata.cloud/pinning/pinJSONToIPFS",
       metadata,
       {
@@ -167,22 +143,25 @@ app.post("/metadata", async (req, res) => {
       }
     );
 
-    const cid = pinataResponse.data.IpfsHash;
+    const metadataCid = metadataUpload.data.IpfsHash;
+    const metadataUri = `ipfs://${metadataCid}`;
 
-    res.json({
-      status: "ok",
-      cid,
-      tokenURI: `ipfs://${cid}`,
-      gateway: `https://gateway.pinata.cloud/ipfs/${cid}`,
-      metadata
+    /* ========= 4️⃣ RESPONSE ========= */
+    return res.json({
+      status: "ready",
+      metadataUri,
+      preview: {
+        name,
+        image: imageUri,
+        category: metadata.category
+      }
     });
 
-  } catch (error) {
-    console.error("METADATA ERROR:", error.response?.data || error.message);
-
-    res.status(500).json({
+  } catch (err) {
+    console.error("MINT PREPARE ERROR:", err.message);
+    return res.status(500).json({
       status: "error",
-      message: "Metadata upload failed"
+      message: "Mint preparation failed"
     });
   }
 });
