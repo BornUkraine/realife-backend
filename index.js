@@ -188,11 +188,12 @@ app.post("/metadata", async (req, res) => {
 });
 
 /* =========================
-   DYNAMIC NFT METADATA (ONCHAIN + IMAGE FROM MINT)
+   DYNAMIC NFT METADATA (v1.1)
+   ONCHAIN + IMAGE + CATEGORY
 ========================= */
 app.get("/metadata/:tokenId", async (req, res) => {
   try {
-
+    // OpenSea / marketplace cache tuning
     res.set({
       "Cache-Control": "public, max-age=60, s-maxage=60, must-revalidate"
     });
@@ -202,7 +203,7 @@ app.get("/metadata/:tokenId", async (req, res) => {
 
     let owner;
 
-    // 1️⃣ SAFE ownerOf
+    /* ========= 1️⃣ SAFE ownerOf ========= */
     try {
       owner = await client.readContract({
         address: contract,
@@ -211,20 +212,26 @@ app.get("/metadata/:tokenId", async (req, res) => {
         args: [tokenId]
       });
     } catch {
+      // NFT not minted yet
       return res.json({
         name: `Realife #${tokenId}`,
         description: "Unminted Realife NFT",
         image: null,
         attributes: [
-          { trait_type: "Status", value: "Not minted" }
+          {
+            trait_type: "Status",
+            value: "Not minted"
+          }
         ]
       });
     }
 
-      // 2️⃣ tokenURI → metadata → image / name / description
+    /* ========= 2️⃣ tokenURI → ORIGINAL METADATA ========= */
+    let name = `Realife #${tokenId}`;
+    let description = "Real-life work tokenized on Realife";
     let image = null;
-    let name = null;
-    let description = null;
+    let originalAttributes = [];
+    let category = null;
 
     try {
       const tokenUri = await client.readContract({
@@ -234,7 +241,7 @@ app.get("/metadata/:tokenId", async (req, res) => {
         args: [tokenId]
       });
 
-      if (tokenUri?.startsWith("ipfs://")) {
+      if (tokenUri && tokenUri.startsWith("ipfs://")) {
         const metadataUrl = tokenUri.replace(
           "ipfs://",
           "https://gateway.pinata.cloud/ipfs/"
@@ -242,62 +249,93 @@ app.get("/metadata/:tokenId", async (req, res) => {
 
         const originalMetadata = await axios.get(metadataUrl);
 
-        image = originalMetadata.data.image ?? null;
-        name = originalMetadata.data.name ?? null;
-        description = originalMetadata.data.description ?? null;
+        name = originalMetadata.data.name ?? name;
+        description = originalMetadata.data.description ?? description;
+        image = originalMetadata.data.image ?? image;
+
+        // v1.1 category (top-level field)
+        category = originalMetadata.data.category ?? null;
+
+        // user-defined attributes
+        originalAttributes = originalMetadata.data.attributes ?? [];
       }
-    } catch {
+    } catch (e) {
       console.warn("Metadata fetch failed, fallback used");
     }
 
-
-    // 3️⃣ balanceOf
-      const balance = await client.readContract({
+    /* ========= 3️⃣ balanceOf ========= */
+    const balance = await client.readContract({
       address: contract,
       abi: ABI,
       functionName: "balanceOf",
       args: [owner]
     });
 
-    // 4️⃣ Reputation score (capped)
+    /* ========= 4️⃣ reputation score ========= */
     const reputationScore = Math.min(Number(balance), 100);
 
-
-    // 5️⃣ block timestamp
+    /* ========= 5️⃣ block timestamp ========= */
     const block = await client.getBlock();
 
+    /* ========= 6️⃣ FIXED + DYNAMIC ATTRIBUTES ========= */
     const attributes = [
-      { trait_type: "Platform", value: "Realife" },
-      { trait_type: "Token ID", value: tokenId.toString() },
-      { trait_type: "Owner", value: owner },
-      { trait_type: "Owned NFTs", value: balance.toString() },
+      ...(category
+        ? [
+          {
+            trait_type: "Category",
+            value: category
+          }
+        ]
+        : []),
+
+      ...originalAttributes,
+
+      {
+        trait_type: "Owner",
+        value: owner
+      },
+      {
+        trait_type: "Owned NFTs",
+        value: balance.toString()
+      },
       {
         trait_type: "Last Updated",
         value: new Date(Number(block.timestamp) * 1000).toISOString()
+      },
+      {
+        trait_type: "Reputation Score",
+        value: reputationScore,
+        display_type: "number"
       }
     ];
 
     // 🟢 Verified Creator
     if (balance >= 3n) {
-      attributes.push({ trait_type: "Verified Creator", value: "Yes" });
+      attributes.push({
+        trait_type: "Verified Creator",
+        value: "Yes"
+      });
     }
 
     // 🟣 Reputation tier
     if (balance >= 5n) {
-      attributes.push({ trait_type: "Reputation", value: "High" });
-    } else if (balance >= 2n) {
-      attributes.push({ trait_type: "Reputation", value: "Medium" });
-    } else {
-      attributes.push({ trait_type: "Reputation", value: "New" });
-    }
-    // 🔢 Reputation Score (numeric, for sorting & future UI)
       attributes.push({
-      trait_type: "Reputation Score",
-      value: reputationScore,
-      display_type: "number"
-    });
+        trait_type: "Reputation",
+        value: "High"
+      });
+    } else if (balance >= 2n) {
+      attributes.push({
+        trait_type: "Reputation",
+        value: "Medium"
+      });
+    } else  {
+      attributes.push({
+        trait_type: "Reputation",
+        value: "New"
+      });
+    }
 
-    // ✅ FINAL RESPONSE
+    /* ========= FINAL RESPONSE ========= */
     return res.json({
       name,
       description,
@@ -307,7 +345,9 @@ app.get("/metadata/:tokenId", async (req, res) => {
 
   } catch (err) {
     console.error("ONCHAIN METADATA ERROR:", err);
-    return res.status(500).json({ status: "error" });
+    return res.status(500).json({
+      status: "error"
+    });
   }
 });
 
