@@ -15,31 +15,71 @@ const ABI = [
     name: "ownerOf",
     stateMutability: "view",
     inputs: [{ name: "tokenId", type: "uint256" }],
-    outputs: [{ type: "address" }]
+    outputs: [{ type: "address" }],
   },
   {
     type: "function",
     name: "balanceOf",
     stateMutability: "view",
     inputs: [{ name: "owner", type: "address" }],
-    outputs: [{ type: "uint256" }]
+    outputs: [{ type: "uint256" }],
   },
   {
     type: "function",
     name: "tokenURI",
     stateMutability: "view",
     inputs: [{ name: "tokenId", type: "uint256" }],
-    outputs: [{ type: "string" }]
-  }
+    outputs: [{ type: "string" }],
+  },
 ];
 
+/* =========================
+   IPFS GATEWAY (for reading)
+   ✅ Railway backend var:
+   IPFS_GATEWAY_ORIGIN = https://nftstorage.link
+========================= */
+const IPFS_GATEWAY_ORIGIN = (process.env.IPFS_GATEWAY_ORIGIN || "https://nftstorage.link").replace(/\/$/, "");
+
+function ipfsToHttp(uri) {
+  const u = String(uri || "").trim();
+  if (!u) return "";
+
+  if (u.startsWith("http://") || u.startsWith("https://") || u.startsWith("data:") || u.startsWith("blob:")) return u;
+
+  if (u.startsWith("ipfs://")) {
+    let p = u.slice("ipfs://".length);
+    if (p.startsWith("ipfs/")) p = p.slice("ipfs/".length);
+    return `${IPFS_GATEWAY_ORIGIN}/ipfs/${p}`;
+  }
+
+  if (u.startsWith("/ipfs/")) return `${IPFS_GATEWAY_ORIGIN}${u}`;
+
+  if (u.startsWith("Qm") || u.startsWith("bafy")) return `${IPFS_GATEWAY_ORIGIN}/ipfs/${u}`;
+
+  return u;
+}
+
+async function headContentType(url) {
+  try {
+    const r = await axios.head(url, {
+      timeout: 12_000,
+      maxRedirects: 5,
+      validateStatus: () => true,
+    });
+    return String(r.headers?.["content-type"] || "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
 
 /* =========================
    BLOCKCHAIN CLIENT
 ========================= */
+if (!process.env.RPC_URL) console.warn("RPC_URL is missing");
+
 const client = createPublicClient({
   chain: baseSepolia,
-  transport: http(process.env.RPC_URL)
+  transport: http(process.env.RPC_URL),
 });
 
 const app = express();
@@ -50,158 +90,175 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-
 /* =========================
    MULTER (memory storage)
 ========================= */
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 100 * 1024 * 1024 // 100MB
-  }
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
 });
 
 /* =========================
    HEALTH CHECK
 ========================= */
-app.get("/", (req, res) => {
-  res.json({
-    status: "ok",
-    service: "Realife backend",
-    message: "Backend is running"
-  });
+app.get("/", (_req, res) => {
+  res.json({ status: "ok", service: "Realife backend", message: "Backend is running" });
 });
+
+/* =========================
+   HELPERS: Pinata upload
+========================= */
+async function pinFileToIpfs(buffer, filename, jwt) {
+  const fileForm = new FormData();
+  fileForm.append("file", buffer, filename);
+
+  const r = await axios.post("https://api.pinata.cloud/pinning/pinFileToIPFS", fileForm, {
+    maxBodyLength: Infinity,
+    headers: {
+      ...fileForm.getHeaders(),
+      Authorization: `Bearer ${jwt}`,
+    },
+  });
+
+  const cid = r.data?.IpfsHash;
+  if (!cid) throw new Error("Pinata pinFileToIPFS: missing IpfsHash");
+  return `ipfs://${cid}`;
+}
 
 /* =========================
    MINT PREPARE (UPLOAD + METADATA)
+   ✅ accepts:
+      - file  (image|video) required
+      - poster (image) optional (recommended for video)
 ========================= */
-app.post("/api/mint/prepare", upload.single("file"), async (req, res) => {
-  try {
-    const {
-      name,
-      description,
-      category,
-      project,
-      supply,
-      proofUrl
-    } = req.body;
+app.post(
+  "/api/mint/prepare",
+  upload.fields([
+    { name: "file", maxCount: 1 },
+    { name: "poster", maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      const { name, description, category, project, supply, proofUrl } = req.body;
 
-    if (!name || !req.file) {
-      return res.status(400).json({
-        status: "error",
-        message: "Name and file are required"
-      });
-    }
+      const fileArr = req.files?.file || [];
+      const posterArr = req.files?.poster || [];
+      const file = fileArr[0] || null;
+      const posterFile = posterArr[0] || null;
 
-    if (!process.env.PINATA_JWT) {
-      return res.status(500).json({
-        status: "error",
-        message: "PINATA_JWT is missing"
-      });
-    }
-
-    /* ========= 1️⃣ Upload FILE to IPFS ========= */
-    const fileForm = new FormData();
-    fileForm.append("file", req.file.buffer, req.file.originalname);
-
-    const fileUpload = await axios.post(
-      "https://api.pinata.cloud/pinning/pinFileToIPFS",
-      fileForm,
-      {
-        maxBodyLength: Infinity,
-        headers: {
-          ...fileForm.getHeaders(),
-          Authorization: `Bearer ${process.env.PINATA_JWT}`
-        }
+      if (!name || !file) {
+        return res.status(400).json({ status: "error", message: "Name and file are required" });
       }
-    );
+      if (!process.env.PINATA_JWT) {
+        return res.status(500).json({ status: "error", message: "PINATA_JWT is missing" });
+      }
 
-    const imageCid = fileUpload.data.IpfsHash;
-    const imageUri = `ipfs://${imageCid}`;
+      const isVideo = String(file.mimetype || "").startsWith("video/");
+      const isPosterOk = posterFile ? String(posterFile.mimetype || "").startsWith("image/") : false;
 
-    /* ========= 2️⃣ Build METADATA ========= */
-    const metadata = {
-      name,
-      description: description || "",
-      image: imageUri,
-      category: category || "Other",
-      project: project || "Realife",
-      supply: Number(supply) || 1,
-      proof: proofUrl || null,
-      attributes: []
-    };
+      // if poster is provided but not image
+      if (posterFile && !isPosterOk) {
+        return res.status(400).json({ status: "error", message: "Poster must be an image file" });
+      }
 
-    /* ========= 3️⃣ Upload METADATA to IPFS ========= */
-    const metadataUpload = await axios.post(
-      "https://api.pinata.cloud/pinning/pinJSONToIPFS",
-      metadata,
-      {
+      /* ========= 1️⃣ Upload main file ========= */
+      const mediaUri = await pinFileToIpfs(file.buffer, file.originalname || "media", process.env.PINATA_JWT);
+
+      /* ========= 2️⃣ Upload poster if provided (and video) ========= */
+      let posterUri = null;
+      if (isVideo && posterFile && isPosterOk) {
+        posterUri = await pinFileToIpfs(posterFile.buffer, posterFile.originalname || "poster", process.env.PINATA_JWT);
+      }
+
+      /* ========= 3️⃣ Build METADATA ========= */
+      const metadata = {
+        name: String(name).trim(),
+        description: (description || "").trim(),
+        category: (category || "Other").trim(),
+        project: (project || "Realife").trim(),
+        supply: Number(supply) || 1,
+        proof: (proofUrl || "").trim() || null,
+        attributes: [],
+      };
+
+      if (isVideo) {
+        // ✅ correct NFT video metadata
+        metadata.animation_url = mediaUri;
+        // ✅ correct thumbnail image for marketplaces
+        metadata.image = posterUri || mediaUri; // fallback if poster missing
+      } else {
+        metadata.image = mediaUri;
+      }
+
+      /* ========= 4️⃣ Upload METADATA ========= */
+      const metadataUpload = await axios.post("https://api.pinata.cloud/pinning/pinJSONToIPFS", metadata, {
         headers: {
           Authorization: `Bearer ${process.env.PINATA_JWT}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
+          "Content-Type": "application/json",
+        },
+      });
 
-    const metadataCid = metadataUpload.data.IpfsHash;
-    const metadataUri = `ipfs://${metadataCid}`;
+      const metadataCid = metadataUpload.data?.IpfsHash;
+      if (!metadataCid) throw new Error("Pinata pinJSONToIPFS: missing IpfsHash");
+      const metadataUri = `ipfs://${metadataCid}`;
 
-    /* ========= 4️⃣ RESPONSE ========= */
-    return res.json({
-      status: "ready",
-      metadataUri,
-      preview: {
-        name,
-        image: imageUri,
-        category: metadata.category
-      }
-    });
-
-  } catch (err) {
-    console.error("MINT PREPARE ERROR:", err.message);
-    return res.status(500).json({
-      status: "error",
-      message: "Mint preparation failed"
-    });
+      /* ========= 5️⃣ RESPONSE ========= */
+      return res.json({
+        status: "ready",
+        metadataUri,
+        tokenURI: metadataUri,
+        preview: {
+          name: metadata.name,
+          category: metadata.category,
+          kind: isVideo ? "video" : "image",
+          media: isVideo ? metadata.animation_url : metadata.image,
+          poster: isVideo ? metadata.image : null, // ✅ poster is image
+          image: metadata.image, // backward compat
+        },
+      });
+    } catch (err) {
+      console.error("MINT PREPARE ERROR:", err?.message || err);
+      return res.status(500).json({ status: "error", message: "Mint preparation failed" });
+    }
   }
-});
+);
 
 /* =========================
-   DYNAMIC NFT METADATA (v1.1)
-   ONCHAIN + IMAGE + CATEGORY
+   DYNAMIC NFT METADATA (v1.3)
+   ONCHAIN + IMAGE + ANIMATION_URL + CATEGORY
 ========================= */
 app.get("/metadata/:tokenId", async (req, res) => {
   try {
-    // OpenSea / marketplace cache tuning
-    res.set({
-      "Cache-Control": "public, max-age=60, s-maxage=60, must-revalidate"
-    });
+    res.set({ "Cache-Control": "public, max-age=60, s-maxage=60, must-revalidate" });
 
-    const tokenId = BigInt(req.params.tokenId);
+    let tokenId;
+    try {
+      tokenId = BigInt(req.params.tokenId);
+    } catch {
+      return res.status(400).json({ status: "error", message: "Invalid tokenId" });
+    }
+
     const contract = process.env.REALIFE_CONTRACT;
-
-    let owner;
+    if (!contract) {
+      return res.status(500).json({ status: "error", message: "REALIFE_CONTRACT is missing" });
+    }
 
     /* ========= 1️⃣ SAFE ownerOf ========= */
+    let owner;
     try {
       owner = await client.readContract({
         address: contract,
         abi: ABI,
         functionName: "ownerOf",
-        args: [tokenId]
+        args: [tokenId],
       });
     } catch {
-      // NFT not minted yet
       return res.json({
         name: `Realife #${tokenId}`,
         description: "Unminted Realife NFT",
         image: null,
-        attributes: [
-          {
-            trait_type: "Status",
-            value: "Not minted"
-          }
-        ]
+        animation_url: null,
+        attributes: [{ trait_type: "Status", value: "Not minted" }],
       });
     }
 
@@ -209,36 +266,50 @@ app.get("/metadata/:tokenId", async (req, res) => {
     let name = `Realife #${tokenId}`;
     let description = "Real-life work tokenized on Realife";
     let image = null;
+    let animation_url = null;
     let originalAttributes = [];
     let category = null;
+    let project = null;
 
     try {
       const tokenUri = await client.readContract({
         address: contract,
         abi: ABI,
         functionName: "tokenURI",
-        args: [tokenId]
+        args: [tokenId],
       });
 
-      if (tokenUri && tokenUri.startsWith("ipfs://")) {
-        const metadataUrl = tokenUri.replace(
-          "ipfs://",
-          "https://gateway.pinata.cloud/ipfs/"
-        );
+      if (tokenUri) {
+        const metadataUrl = ipfsToHttp(tokenUri);
+        const originalMetadata = await axios.get(metadataUrl, { timeout: 12_000 });
 
-        const originalMetadata = await axios.get(metadataUrl);
+        name = originalMetadata.data?.name ?? name;
+        description = originalMetadata.data?.description ?? description;
 
-        name = originalMetadata.data.name ?? name;
-        description = originalMetadata.data.description ?? description;
-        image = originalMetadata.data.image ?? image;
+        image = originalMetadata.data?.image ?? image;
+        animation_url =
+          originalMetadata.data?.animation_url ??
+          originalMetadata.data?.animationUrl ??
+          originalMetadata.data?.animation ??
+          null;
 
-        // v1.1 category (top-level field)
-        category = originalMetadata.data.category ?? null;
+        category = originalMetadata.data?.category ?? null;
+        project = originalMetadata.data?.project ?? null;
 
-        // user-defined attributes
-        originalAttributes = originalMetadata.data.attributes ?? [];
+        originalAttributes = Array.isArray(originalMetadata.data?.attributes) ? originalMetadata.data.attributes : [];
+
+        // fallback for old "video in image"
+        if (!animation_url && image) {
+          const ct = await headContentType(ipfsToHttp(image));
+          if (ct.startsWith("video/")) animation_url = image;
+        }
+
+        // if image equals animation_url, hide image to avoid broken <img>
+        if (image && animation_url && String(image).trim() === String(animation_url).trim()) {
+          image = null;
+        }
       }
-    } catch (e) {
+    } catch {
       console.warn("Metadata fetch failed, fallback used");
     }
 
@@ -247,7 +318,7 @@ app.get("/metadata/:tokenId", async (req, res) => {
       address: contract,
       abi: ABI,
       functionName: "balanceOf",
-      args: [owner]
+      args: [owner],
     });
 
     /* ========= 4️⃣ reputation score ========= */
@@ -256,82 +327,37 @@ app.get("/metadata/:tokenId", async (req, res) => {
     /* ========= 5️⃣ block timestamp ========= */
     const block = await client.getBlock();
 
-    /* ========= 6️⃣ FIXED + DYNAMIC ATTRIBUTES ========= */
+    /* ========= 6️⃣ ATTRIBUTES ========= */
     const attributes = [
-      ...(category
-        ? [
-          {
-            trait_type: "Category",
-            value: category
-          }
-        ]
-        : []),
-
+      ...(category ? [{ trait_type: "Category", value: category }] : []),
+      ...(project ? [{ trait_type: "Project", value: project }] : []),
       ...originalAttributes,
-
-      {
-        trait_type: "Owner",
-        value: owner
-      },
-      {
-        trait_type: "Owned NFTs",
-        value: balance.toString()
-      },
-      {
-        trait_type: "Last Updated",
-        value: new Date(Number(block.timestamp) * 1000).toISOString()
-      },
-      {
-        trait_type: "Reputation Score",
-        value: reputationScore,
-        display_type: "number"
-      }
+      { trait_type: "Owner", value: owner },
+      { trait_type: "Owned NFTs", value: balance.toString() },
+      { trait_type: "Last Updated", value: new Date(Number(block.timestamp) * 1000).toISOString() },
+      { trait_type: "Reputation Score", value: reputationScore, display_type: "number" },
     ];
 
-    // 🟢 Verified Creator
-    if (balance >= 3n) {
-      attributes.push({
-        trait_type: "Verified Creator",
-        value: "Yes"
-      });
-    }
+    if (balance >= 3n) attributes.push({ trait_type: "Verified Creator", value: "Yes" });
+    if (balance >= 5n) attributes.push({ trait_type: "Reputation", value: "High" });
+    else if (balance >= 2n) attributes.push({ trait_type: "Reputation", value: "Medium" });
+    else attributes.push({ trait_type: "Reputation", value: "New" });
 
-    // 🟣 Reputation tier
-    if (balance >= 5n) {
-      attributes.push({
-        trait_type: "Reputation",
-        value: "High"
-      });
-    } else if (balance >= 2n) {
-      attributes.push({
-        trait_type: "Reputation",
-        value: "Medium"
-      });
-    } else  {
-      attributes.push({
-        trait_type: "Reputation",
-        value: "New"
-      });
-    }
+    const imageHttp = image ? ipfsToHttp(image) : null;
+    const animHttp = animation_url ? ipfsToHttp(animation_url) : null;
 
-    /* ========= FINAL RESPONSE ========= */
     return res.json({
       name,
       description,
-      image,
-      attributes
+      image: imageHttp,
+      animation_url: animHttp,
+      attributes,
     });
-
   } catch (err) {
     console.error("ONCHAIN METADATA ERROR:", err);
-    return res.status(500).json({
-      status: "error"
-    });
+    return res.status(500).json({ status: "error" });
   }
 });
-
-
-
 
 /* =========================
    START SERVER (ALWAYS LAST)
