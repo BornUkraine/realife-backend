@@ -6,6 +6,17 @@ import FormData from "form-data";
 import { createPublicClient, http } from "viem";
 import { baseSepolia } from "viem/chains";
 
+// ✅ auto-poster (server-side)
+import fs from "fs/promises";
+import path from "path";
+import os from "os";
+import { spawn } from "child_process";
+import ffmpegStatic from "ffmpeg-static";
+
+// ✅ robust ESM import for ffmpeg-static
+const ffmpegPath =
+  typeof ffmpegStatic === "string" ? ffmpegStatic : (ffmpegStatic?.default ?? null);
+
 /* =========================
    ABI (READ-ONLY)
 ========================= */
@@ -35,8 +46,6 @@ const ABI = [
 
 /* =========================
    IPFS GATEWAY (for reading)
-   ✅ Railway backend var:
-   IPFS_GATEWAY_ORIGIN = https://nftstorage.link
 ========================= */
 const IPFS_GATEWAY_ORIGIN = (process.env.IPFS_GATEWAY_ORIGIN || "https://nftstorage.link").replace(/\/$/, "");
 
@@ -44,7 +53,8 @@ function ipfsToHttp(uri) {
   const u = String(uri || "").trim();
   if (!u) return "";
 
-  if (u.startsWith("http://") || u.startsWith("https://") || u.startsWith("data:") || u.startsWith("blob:")) return u;
+  if (u.startsWith("http://") || u.startsWith("https://") || u.startsWith("data:") || u.startsWith("blob:"))
+    return u;
 
   if (u.startsWith("ipfs://")) {
     let p = u.slice("ipfs://".length);
@@ -53,7 +63,6 @@ function ipfsToHttp(uri) {
   }
 
   if (u.startsWith("/ipfs/")) return `${IPFS_GATEWAY_ORIGIN}${u}`;
-
   if (u.startsWith("Qm") || u.startsWith("bafy")) return `${IPFS_GATEWAY_ORIGIN}/ipfs/${u}`;
 
   return u;
@@ -73,9 +82,73 @@ async function headContentType(url) {
 }
 
 /* =========================
+   AUTO-POSTER HELPERS (ffmpeg)
+   ✅ Install in backend:
+      npm i ffmpeg-static
+   ✅ Optional env fallback:
+      DEFAULT_VIDEO_POSTER = ipfs://<CID>   (must be IMAGE)
+========================= */
+async function runFfmpeg(args) {
+  if (!ffmpegPath) throw new Error("ffmpeg binary not found (ffmpeg-static)");
+  await new Promise((resolve, reject) => {
+    const p = spawn(ffmpegPath, args);
+    let err = "";
+    p.stderr.on("data", (d) => (err += d.toString()));
+    p.on("close", (code) => {
+      if (code === 0) return resolve();
+      reject(new Error(`ffmpeg failed (${code}): ${err || "unknown"}`));
+    });
+  });
+}
+
+async function makePosterFromVideo(videoBuffer) {
+  if (!ffmpegPath) throw new Error("ffmpeg binary not found (ffmpeg-static)");
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "rl-"));
+  const inPath = path.join(dir, "in.mp4");
+  const outPath = path.join(dir, "poster.jpg");
+
+  try {
+    await fs.writeFile(inPath, videoBuffer);
+
+    // try 1.0s, then fallback 0.1s
+    const tries = ["00:00:01.000", "00:00:00.100"];
+    let lastErr = null;
+
+    for (const ss of tries) {
+      try {
+        await runFfmpeg([
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-ss",
+          ss,
+          "-i",
+          inPath,
+          "-frames:v",
+          "1",
+          "-q:v",
+          "2",
+          outPath,
+        ]);
+        return await fs.readFile(outPath);
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+
+    throw lastErr || new Error("Failed to extract poster frame");
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/* =========================
    BLOCKCHAIN CLIENT
 ========================= */
-if (!process.env.RPC_URL) console.warn("RPC_URL is missing");
+if (!process.env.RPC_URL) {
+  throw new Error("RPC_URL is missing");
+}
 
 const client = createPublicClient({
   chain: baseSepolia,
@@ -127,9 +200,6 @@ async function pinFileToIpfs(buffer, filename, jwt) {
 
 /* =========================
    MINT PREPARE (UPLOAD + METADATA)
-   ✅ accepts:
-      - file  (image|video) required
-      - poster (image) optional (recommended for video)
 ========================= */
 app.post(
   "/api/mint/prepare",
@@ -156,7 +226,6 @@ app.post(
       const isVideo = String(file.mimetype || "").startsWith("video/");
       const isPosterOk = posterFile ? String(posterFile.mimetype || "").startsWith("image/") : false;
 
-      // if poster is provided but not image
       if (posterFile && !isPosterOk) {
         return res.status(400).json({ status: "error", message: "Poster must be an image file" });
       }
@@ -164,10 +233,32 @@ app.post(
       /* ========= 1️⃣ Upload main file ========= */
       const mediaUri = await pinFileToIpfs(file.buffer, file.originalname || "media", process.env.PINATA_JWT);
 
-      /* ========= 2️⃣ Upload poster if provided (and video) ========= */
+      /* ========= 2️⃣ Poster logic (video) ========= */
       let posterUri = null;
-      if (isVideo && posterFile && isPosterOk) {
-        posterUri = await pinFileToIpfs(posterFile.buffer, posterFile.originalname || "poster", process.env.PINATA_JWT);
+
+      if (isVideo) {
+        if (posterFile && isPosterOk) {
+          posterUri = await pinFileToIpfs(
+            posterFile.buffer,
+            posterFile.originalname || "poster",
+            process.env.PINATA_JWT
+          );
+        } else {
+          try {
+            const posterBuf = await makePosterFromVideo(file.buffer);
+            posterUri = await pinFileToIpfs(posterBuf, "poster.jpg", process.env.PINATA_JWT);
+          } catch {
+            posterUri = process.env.DEFAULT_VIDEO_POSTER || null;
+          }
+        }
+
+        if (!posterUri) {
+          return res.status(400).json({
+            status: "error",
+            message:
+              "Poster required for video. Upload poster image or set DEFAULT_VIDEO_POSTER env (ipfs://...).",
+          });
+        }
       }
 
       /* ========= 3️⃣ Build METADATA ========= */
@@ -182,10 +273,8 @@ app.post(
       };
 
       if (isVideo) {
-        // ✅ correct NFT video metadata
         metadata.animation_url = mediaUri;
-        // ✅ correct thumbnail image for marketplaces
-        metadata.image = posterUri || mediaUri; // fallback if poster missing
+        metadata.image = posterUri; // ✅ always image
       } else {
         metadata.image = mediaUri;
       }
@@ -212,8 +301,8 @@ app.post(
           category: metadata.category,
           kind: isVideo ? "video" : "image",
           media: isVideo ? metadata.animation_url : metadata.image,
-          poster: isVideo ? metadata.image : null, // ✅ poster is image
-          image: metadata.image, // backward compat
+          poster: isVideo ? metadata.image : null,
+          image: metadata.image,
         },
       });
     } catch (err) {
@@ -225,7 +314,6 @@ app.post(
 
 /* =========================
    DYNAMIC NFT METADATA (v1.3)
-   ONCHAIN + IMAGE + ANIMATION_URL + CATEGORY
 ========================= */
 app.get("/metadata/:tokenId", async (req, res) => {
   try {
