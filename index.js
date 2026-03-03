@@ -3,7 +3,7 @@ import cors from "cors";
 import multer from "multer";
 import axios from "axios";
 import FormData from "form-data";
-import { createPublicClient, http, parseAbiItem, zeroAddress } from "viem";
+import { createPublicClient, http } from "viem";
 import { baseSepolia } from "viem/chains";
 
 // ✅ auto-poster (server-side)
@@ -18,36 +18,11 @@ const ffmpegPath =
   typeof ffmpegStatic === "string" ? ffmpegStatic : (ffmpegStatic?.default ?? null);
 
 /* =========================
-   ABI (READ-ONLY)
+   ABI (READ-ONLY) — 1155 ONLY
+   Contract: Realife1155New
 ========================= */
-
-// ERC-721 (your existing contract)
-const ABI_721 = [
-  {
-    type: "function",
-    name: "ownerOf",
-    stateMutability: "view",
-    inputs: [{ name: "tokenId", type: "uint256" }],
-    outputs: [{ type: "address" }],
-  },
-  {
-    type: "function",
-    name: "balanceOf",
-    stateMutability: "view",
-    inputs: [{ name: "owner", type: "address" }],
-    outputs: [{ type: "uint256" }],
-  },
-  {
-    type: "function",
-    name: "tokenURI",
-    stateMutability: "view",
-    inputs: [{ name: "tokenId", type: "uint256" }],
-    outputs: [{ type: "string" }],
-  },
-];
-
-// ERC-1155 (Editions contract)
-const ABI_1155 = [
+const ABI_1155_NEW = [
+  // token URI (per-token)
   {
     type: "function",
     name: "uri",
@@ -55,12 +30,29 @@ const ABI_1155 = [
     inputs: [{ name: "id", type: "uint256" }],
     outputs: [{ type: "string" }],
   },
+  // ERC1155Supply
   {
     type: "function",
     name: "totalSupply",
     stateMutability: "view",
     inputs: [{ name: "id", type: "uint256" }],
     outputs: [{ type: "uint256" }],
+  },
+  // public mapping maxSupply(uint256) -> uint256
+  {
+    type: "function",
+    name: "maxSupply",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "uint256" }],
+    outputs: [{ type: "uint256" }],
+  },
+  // public mapping creatorOf(uint256) -> address
+  {
+    type: "function",
+    name: "creatorOf",
+    stateMutability: "view",
+    inputs: [{ name: "", type: "uint256" }],
+    outputs: [{ type: "address" }],
   },
 ];
 
@@ -76,7 +68,12 @@ function ipfsToHttp(uri) {
   const u = String(uri || "").trim();
   if (!u) return "";
 
-  if (u.startsWith("http://") || u.startsWith("https://") || u.startsWith("data:") || u.startsWith("blob:"))
+  if (
+    u.startsWith("http://") ||
+    u.startsWith("https://") ||
+    u.startsWith("data:") ||
+    u.startsWith("blob:")
+  )
     return u;
 
   if (u.startsWith("ipfs://")) {
@@ -198,7 +195,7 @@ const upload = multer({
    HEALTH CHECK
 ========================= */
 app.get("/", (_req, res) => {
-  res.json({ status: "ok", service: "Realife backend", message: "Backend is running" });
+  res.json({ status: "ok", service: "accurate-art", message: "Backend is running" });
 });
 
 /* =========================
@@ -223,6 +220,8 @@ async function pinFileToIpfs(buffer, filename, jwt) {
 
 /* =========================
    MINT PREPARE (UPLOAD + METADATA)
+   - Returns tokenURI (metadataUri)
+   - Frontend calls 1155 contract createEdition(supply, tokenURI)
 ========================= */
 app.post(
   "/api/mint/prepare",
@@ -254,7 +253,11 @@ app.post(
       }
 
       /* ========= 1️⃣ Upload main file ========= */
-      const mediaUri = await pinFileToIpfs(file.buffer, file.originalname || "media", process.env.PINATA_JWT);
+      const mediaUri = await pinFileToIpfs(
+        file.buffer,
+        file.originalname || "media",
+        process.env.PINATA_JWT
+      );
 
       /* ========= 2️⃣ Poster logic (video) ========= */
       let posterUri = null;
@@ -326,6 +329,7 @@ app.post(
           media: isVideo ? metadata.animation_url : metadata.image,
           poster: isVideo ? metadata.image : null,
           image: metadata.image,
+          supply: metadata.supply,
         },
       });
     } catch (err) {
@@ -336,148 +340,12 @@ app.post(
 );
 
 /* =========================
-   DYNAMIC NFT METADATA (ERC-721) (v1.3)
-========================= */
-app.get("/metadata/:tokenId", async (req, res) => {
-  try {
-    res.set({ "Cache-Control": "public, max-age=60, s-maxage=60, must-revalidate" });
-
-    let tokenId;
-    try {
-      tokenId = BigInt(req.params.tokenId);
-    } catch {
-      return res.status(400).json({ status: "error", message: "Invalid tokenId" });
-    }
-
-    const contract = process.env.REALIFE_CONTRACT;
-    if (!contract) {
-      return res.status(500).json({ status: "error", message: "REALIFE_CONTRACT is missing" });
-    }
-
-    /* ========= 1️⃣ SAFE ownerOf ========= */
-    let owner;
-    try {
-      owner = await client.readContract({
-        address: contract,
-        abi: ABI_721,
-        functionName: "ownerOf",
-        args: [tokenId],
-      });
-    } catch {
-      return res.json({
-        name: `Realife #${tokenId}`,
-        description: "Unminted Realife NFT",
-        image: null,
-        animation_url: null,
-        attributes: [{ trait_type: "Status", value: "Not minted" }],
-      });
-    }
-
-    /* ========= 2️⃣ tokenURI → ORIGINAL METADATA ========= */
-    let name = `Realife #${tokenId}`;
-    let description = "Real-life work tokenized on Realife";
-    let image = null;
-    let animation_url = null;
-    let originalAttributes = [];
-    let category = null;
-    let project = null;
-
-    try {
-      const tokenUri = await client.readContract({
-        address: contract,
-        abi: ABI_721,
-        functionName: "tokenURI",
-        args: [tokenId],
-      });
-
-      if (tokenUri) {
-        const metadataUrl = ipfsToHttp(tokenUri);
-        const originalMetadata = await axios.get(metadataUrl, { timeout: 12_000 });
-
-        name = originalMetadata.data?.name ?? name;
-        description = originalMetadata.data?.description ?? description;
-
-        image = originalMetadata.data?.image ?? image;
-        animation_url =
-          originalMetadata.data?.animation_url ??
-          originalMetadata.data?.animationUrl ??
-          originalMetadata.data?.animation ??
-          null;
-
-        category = originalMetadata.data?.category ?? null;
-        project = originalMetadata.data?.project ?? null;
-
-        originalAttributes = Array.isArray(originalMetadata.data?.attributes)
-          ? originalMetadata.data.attributes
-          : [];
-
-        // fallback for old "video in image"
-        if (!animation_url && image) {
-          const ct = await headContentType(ipfsToHttp(image));
-          if (ct.startsWith("video/")) animation_url = image;
-        }
-
-        // if image equals animation_url, hide image to avoid broken <img>
-        if (image && animation_url && String(image).trim() === String(animation_url).trim()) {
-          image = null;
-        }
-      }
-    } catch {
-      console.warn("Metadata fetch failed, fallback used");
-    }
-
-    /* ========= 3️⃣ balanceOf ========= */
-    const balance = await client.readContract({
-      address: contract,
-      abi: ABI_721,
-      functionName: "balanceOf",
-      args: [owner],
-    });
-
-    /* ========= 4️⃣ reputation score ========= */
-    const reputationScore = Math.min(Number(balance), 100);
-
-    /* ========= 5️⃣ block timestamp ========= */
-    const block = await client.getBlock();
-
-    /* ========= 6️⃣ ATTRIBUTES ========= */
-    const attributes = [
-      ...(category ? [{ trait_type: "Category", value: category }] : []),
-      ...(project ? [{ trait_type: "Project", value: project }] : []),
-      ...originalAttributes,
-      { trait_type: "Owner", value: owner },
-      { trait_type: "Owned NFTs", value: balance.toString() },
-      { trait_type: "Last Updated", value: new Date(Number(block.timestamp) * 1000).toISOString() },
-      { trait_type: "Reputation Score", value: reputationScore, display_type: "number" },
-    ];
-
-    if (balance >= 3n) attributes.push({ trait_type: "Verified Creator", value: "Yes" });
-    if (balance >= 5n) attributes.push({ trait_type: "Reputation", value: "High" });
-    else if (balance >= 2n) attributes.push({ trait_type: "Reputation", value: "Medium" });
-    else attributes.push({ trait_type: "Reputation", value: "New" });
-
-    const imageHttp = image ? ipfsToHttp(image) : null;
-    const animHttp = animation_url ? ipfsToHttp(animation_url) : null;
-
-    return res.json({
-      name,
-      description,
-      image: imageHttp,
-      animation_url: animHttp,
-      attributes,
-    });
-  } catch (err) {
-    console.error("ONCHAIN METADATA ERROR:", err);
-    return res.status(500).json({ status: "error" });
-  }
-});
-
-/* =========================
-   DYNAMIC NFT METADATA (ERC-1155) (v1.0)
+   DYNAMIC NFT METADATA (ERC-1155) — NEW CONTRACT
    GET /metadata1155/:tokenId
    - reads uri(id)
    - reads totalSupply(id)
-   - optional: tries to find creator via TransferSingle(from=0x0)
+   - reads maxSupply(id)
+   - reads creatorOf(id)
 ========================= */
 app.get("/metadata1155/:tokenId", async (req, res) => {
   try {
@@ -490,9 +358,9 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
       return res.status(400).json({ status: "error", message: "Invalid tokenId" });
     }
 
-    const contract1155 = process.env.REALIFE_1155_CONTRACT;
+    const contract1155 = process.env.REALIFE_1155_NEW_CONTRACT;
     if (!contract1155) {
-      return res.status(500).json({ status: "error", message: "REALIFE_1155_CONTRACT is missing" });
+      return res.status(500).json({ status: "error", message: "REALIFE_1155_NEW_CONTRACT is missing" });
     }
 
     // 1) uri(id)
@@ -500,7 +368,7 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
     try {
       tokenUri = await client.readContract({
         address: contract1155,
-        abi: ABI_1155,
+        abi: ABI_1155_NEW,
         functionName: "uri",
         args: [tokenId],
       });
@@ -513,7 +381,7 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
     try {
       totalSupply = await client.readContract({
         address: contract1155,
-        abi: ABI_1155,
+        abi: ABI_1155_NEW,
         functionName: "totalSupply",
         args: [tokenId],
       });
@@ -521,9 +389,36 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
       totalSupply = 0n;
     }
 
-    // 3) fetch original metadata JSON from uri
+    // 3) maxSupply(id)
+    let max = 0n;
+    try {
+      max = await client.readContract({
+        address: contract1155,
+        abi: ABI_1155_NEW,
+        functionName: "maxSupply",
+        args: [tokenId],
+      });
+    } catch {
+      max = 0n;
+    }
+
+    // 4) creatorOf(id)
+    let creator = null;
+    try {
+      const c = await client.readContract({
+        address: contract1155,
+        abi: ABI_1155_NEW,
+        functionName: "creatorOf",
+        args: [tokenId],
+      });
+      creator = c ? String(c) : null;
+    } catch {
+      creator = null;
+    }
+
+    // 5) fetch original metadata JSON from uri
     let name = `Realife Edition #${tokenId}`;
-    let description = "Real-life edition tokenized on Realife";
+    let description = "Real-life tokenized on Realife";
     let image = null;
     let animation_url = null;
     let originalAttributes = [];
@@ -567,42 +462,22 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
       }
     }
 
-    // 4) optional: try to find creator via TransferSingle mint
-    let creator = null;
-    try {
-      const latest = await client.getBlockNumber();
-      const fromBlock = latest > 200000n ? latest - 200000n : 0n;
-
-      const transferSingleEvent = parseAbiItem(
-        "event TransferSingle(address indexed operator, address indexed from, address indexed to, uint256 id, uint256 value)"
-      );
-
-      const logs = await client.getLogs({
-        address: contract1155,
-        event: transferSingleEvent,
-        args: { id: tokenId },
-        fromBlock,
-        toBlock: latest,
-      });
-
-      const mintLog = logs.find((l) => (l.args?.from || "").toLowerCase() === zeroAddress.toLowerCase());
-      if (mintLog?.args?.to) creator = mintLog.args.to;
-    } catch {
-      creator = null;
-    }
-
     const block = await client.getBlock();
 
     const imageHttp = image ? ipfsToHttp(image) : null;
     const animHttp = animation_url ? ipfsToHttp(animation_url) : null;
 
+    const isUnique = max === 1n;
+
     const attributes = [
       { trait_type: "Standard", value: "ERC1155" },
       { trait_type: "Token ID", value: tokenId.toString() },
       { trait_type: "Total Supply", value: totalSupply.toString() },
+      ...(max > 0n ? [{ trait_type: "Max Supply", value: max.toString() }] : []),
       ...(creator ? [{ trait_type: "Creator", value: creator }] : []),
       ...(category ? [{ trait_type: "Category", value: category }] : []),
       ...(project ? [{ trait_type: "Project", value: project }] : []),
+      ...(isUnique ? [{ trait_type: "Unique", value: "Yes" }] : []),
       ...originalAttributes,
       { trait_type: "Contract", value: contract1155 },
       { trait_type: "Last Updated", value: new Date(Number(block.timestamp) * 1000).toISOString() },
@@ -627,5 +502,5 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`Realife backend running on port ${PORT}`);
+  console.log(`accurate-art running on port ${PORT}`);
 });
