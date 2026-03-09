@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import multer from "multer";
@@ -218,10 +219,28 @@ async function pinFileToIpfs(buffer, filename, jwt) {
   return `ipfs://${cid}`;
 }
 
+function cleanText(v, fallback = "") {
+  return String(v ?? fallback).trim();
+}
+
+function cleanPositiveInt(v, fallback = 1) {
+  const n = Number(v ?? fallback);
+  if (!Number.isFinite(n)) return fallback;
+  const i = Math.floor(n);
+  return i > 0 ? i : fallback;
+}
+
+function pushAttr(target, traitType, value) {
+  const s = cleanText(value, "");
+  if (!s) return;
+  target.push({ trait_type: traitType, value: s });
+}
+
 /* =========================
    MINT PREPARE (UPLOAD + METADATA)
    - Returns tokenURI (metadataUri)
    - Frontend calls 1155 contract createEdition(supply, tokenURI)
+   - Supports cafe/store metadata fields too
 ========================= */
 app.post(
   "/api/mint/prepare",
@@ -231,7 +250,20 @@ app.post(
   ]),
   async (req, res) => {
     try {
-      const { name, description, category, project, supply, proofUrl } = req.body;
+      const {
+        name,
+        description,
+        category,
+        project,
+        supply,
+        proofUrl,
+
+        // ✅ new optional fields
+        collection,
+        drink,
+        rarity,
+        externalUrl,
+      } = req.body;
 
       const fileArr = req.files?.file || [];
       const posterArr = req.files?.poster || [];
@@ -244,6 +276,17 @@ app.post(
       if (!process.env.PINATA_JWT) {
         return res.status(500).json({ status: "error", message: "PINATA_JWT is missing" });
       }
+
+      const safeName = cleanText(name);
+      const safeDescription = cleanText(description);
+      const safeCategory = cleanText(category, "Other");
+      const safeProject = cleanText(project, "Realife");
+      const safeCollection = cleanText(collection, safeProject || "Realife");
+      const safeDrink = cleanText(drink);
+      const safeRarity = cleanText(rarity);
+      const safeProofUrl = cleanText(proofUrl);
+      const safeExternalUrl = cleanText(externalUrl || proofUrl);
+      const safeSupply = cleanPositiveInt(supply, 1);
 
       const isVideo = String(file.mimetype || "").startsWith("video/");
       const isPosterOk = posterFile ? String(posterFile.mimetype || "").startsWith("image/") : false;
@@ -288,14 +331,27 @@ app.post(
       }
 
       /* ========= 3️⃣ Build METADATA ========= */
+      const attributes = [];
+
+      pushAttr(attributes, "Collection", safeCollection);
+      pushAttr(attributes, "Project", safeProject);
+      pushAttr(attributes, "Category", safeCategory);
+      pushAttr(attributes, "Drink", safeDrink);
+      pushAttr(attributes, "Rarity", safeRarity);
+      pushAttr(attributes, "Supply", String(safeSupply));
+
       const metadata = {
-        name: String(name).trim(),
-        description: (description || "").trim(),
-        category: (category || "Other").trim(),
-        project: (project || "Realife").trim(),
-        supply: Number(supply) || 1,
-        proof: (proofUrl || "").trim() || null,
-        attributes: [],
+        name: safeName,
+        description: safeDescription,
+        category: safeCategory,
+        project: safeProject,
+        collection: safeCollection,
+        drink: safeDrink || null,
+        rarity: safeRarity || null,
+        supply: safeSupply,
+        proof: safeProofUrl || null,
+        external_url: safeExternalUrl || null,
+        attributes,
       };
 
       if (isVideo) {
@@ -325,6 +381,9 @@ app.post(
         preview: {
           name: metadata.name,
           category: metadata.category,
+          collection: metadata.collection,
+          drink: metadata.drink,
+          rarity: metadata.rarity,
           kind: isVideo ? "video" : "image",
           media: isVideo ? metadata.animation_url : metadata.image,
           poster: isVideo ? metadata.image : null,
