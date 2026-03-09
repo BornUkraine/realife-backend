@@ -231,7 +231,18 @@ app.post(
   ]),
   async (req, res) => {
     try {
-      const { name, description, category, project, supply, proofUrl } = req.body;
+      const {
+        name,
+        description,
+        category,
+        project,
+        supply,
+        proofUrl,
+        collection,
+        drink,
+        rarity,
+        externalUrl,
+      } = req.body;
 
       const fileArr = req.files?.file || [];
       const posterArr = req.files?.poster || [];
@@ -288,14 +299,38 @@ app.post(
       }
 
       /* ========= 3️⃣ Build METADATA ========= */
+      const safeName = String(name || "").trim();
+      const safeDescription = String(description || "").trim();
+      const safeCategory = String(category || "Other").trim();
+      const safeProject = String(project || "Realife").trim();
+      const safeCollection = String(collection || safeProject || "Realife").trim();
+      const safeDrink = String(drink || "").trim();
+      const safeRarity = String(rarity || "").trim();
+      const safeSupply = Number(supply) || 1;
+      const safeProofUrl = String(proofUrl || "").trim() || null;
+      const safeExternalUrl = String(externalUrl || proofUrl || "").trim() || null;
+
+      const attributes = [
+        { trait_type: "Collection", value: safeCollection },
+        { trait_type: "Project", value: safeProject },
+        { trait_type: "Category", value: safeCategory },
+        ...(safeDrink ? [{ trait_type: "Drink", value: safeDrink }] : []),
+        ...(safeRarity ? [{ trait_type: "Rarity", value: safeRarity }] : []),
+        { trait_type: "Supply", value: String(safeSupply) },
+      ];
+
       const metadata = {
-        name: String(name).trim(),
-        description: (description || "").trim(),
-        category: (category || "Other").trim(),
-        project: (project || "Realife").trim(),
-        supply: Number(supply) || 1,
-        proof: (proofUrl || "").trim() || null,
-        attributes: [],
+        name: safeName,
+        description: safeDescription,
+        category: safeCategory,
+        project: safeProject,
+        collection: safeCollection,
+        drink: safeDrink || null,
+        rarity: safeRarity || null,
+        supply: safeSupply,
+        proof: safeProofUrl,
+        external_url: safeExternalUrl,
+        attributes,
       };
 
       if (isVideo) {
@@ -325,6 +360,9 @@ app.post(
         preview: {
           name: metadata.name,
           category: metadata.category,
+          collection: metadata.collection,
+          drink: metadata.drink,
+          rarity: metadata.rarity,
           kind: isVideo ? "video" : "image",
           media: isVideo ? metadata.animation_url : metadata.image,
           poster: isVideo ? metadata.image : null,
