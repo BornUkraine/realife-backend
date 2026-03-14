@@ -22,7 +22,6 @@ const ffmpegPath =
    Contract: Realife1155New
 ========================= */
 const ABI_1155_NEW = [
-  // token URI (per-token)
   {
     type: "function",
     name: "uri",
@@ -30,7 +29,6 @@ const ABI_1155_NEW = [
     inputs: [{ name: "id", type: "uint256" }],
     outputs: [{ type: "string" }],
   },
-  // ERC1155Supply
   {
     type: "function",
     name: "totalSupply",
@@ -38,7 +36,6 @@ const ABI_1155_NEW = [
     inputs: [{ name: "id", type: "uint256" }],
     outputs: [{ type: "uint256" }],
   },
-  // public mapping maxSupply(uint256) -> uint256
   {
     type: "function",
     name: "maxSupply",
@@ -46,7 +43,6 @@ const ABI_1155_NEW = [
     inputs: [{ name: "", type: "uint256" }],
     outputs: [{ type: "uint256" }],
   },
-  // public mapping creatorOf(uint256) -> address
   {
     type: "function",
     name: "creatorOf",
@@ -73,8 +69,9 @@ function ipfsToHttp(uri) {
     u.startsWith("https://") ||
     u.startsWith("data:") ||
     u.startsWith("blob:")
-  )
+  ) {
     return u;
+  }
 
   if (u.startsWith("ipfs://")) {
     let p = u.slice("ipfs://".length);
@@ -99,6 +96,12 @@ async function headContentType(url) {
   } catch {
     return "";
   }
+}
+
+function toBool(v) {
+  if (typeof v === "boolean") return v;
+  const s = String(v ?? "").trim().toLowerCase();
+  return s === "1" || s === "true" || s === "yes" || s === "on";
 }
 
 /* =========================
@@ -131,7 +134,6 @@ async function makePosterFromVideo(videoBuffer) {
   try {
     await fs.writeFile(inPath, videoBuffer);
 
-    // try 1.0s, then fallback 0.1s
     const tries = ["00:00:01.000", "00:00:00.100"];
     let lastErr = null;
 
@@ -236,12 +238,18 @@ app.post(
         description,
         category,
         project,
+        brandProject,
         supply,
         proofUrl,
         collection,
         drink,
+        item,
         rarity,
         externalUrl,
+        vertical,
+        deliveryEnabled,
+        physicalItemIncluded,
+        officialItem,
       } = req.body;
 
       const fileArr = req.files?.file || [];
@@ -303,31 +311,60 @@ app.post(
       const safeDescription = String(description || "").trim();
       const safeCategory = String(category || "Other").trim();
       const safeProject = String(project || "Realife").trim();
+      const safeBrandProject = String(brandProject || safeProject || "Realife").trim();
       const safeCollection = String(collection || safeProject || "Realife").trim();
       const safeDrink = String(drink || "").trim();
+      const safeItem = String(item || "").trim();
       const safeRarity = String(rarity || "").trim();
       const safeSupply = Number(supply) || 1;
       const safeProofUrl = String(proofUrl || "").trim() || null;
       const safeExternalUrl = String(externalUrl || proofUrl || "").trim() || null;
+      const safeVertical = String(vertical || "").trim() || null;
+
+      const safeDeliveryEnabled = toBool(deliveryEnabled);
+      const safePhysicalItemIncluded = toBool(physicalItemIncluded);
+      const safeOfficialItem = toBool(officialItem);
 
       const attributes = [
         { trait_type: "Collection", value: safeCollection },
         { trait_type: "Project", value: safeProject },
+        ...(safeBrandProject ? [{ trait_type: "Brand Project", value: safeBrandProject }] : []),
         { trait_type: "Category", value: safeCategory },
+        ...(safeItem ? [{ trait_type: "Item", value: safeItem }] : []),
         ...(safeDrink ? [{ trait_type: "Drink", value: safeDrink }] : []),
         ...(safeRarity ? [{ trait_type: "Rarity", value: safeRarity }] : []),
+        ...(safeVertical ? [{ trait_type: "Vertical", value: safeVertical }] : []),
+        ...(safeVertical === "store"
+          ? [
+              { trait_type: "Delivery Enabled", value: safeDeliveryEnabled ? "Yes" : "No" },
+              {
+                trait_type: "Physical Item Included",
+                value: safePhysicalItemIncluded ? "Yes" : "No",
+              },
+              { trait_type: "Official Item", value: safeOfficialItem ? "Yes" : "No" },
+            ]
+          : []),
         { trait_type: "Supply", value: String(safeSupply) },
       ];
 
       const metadata = {
         name: safeName,
         description: safeDescription,
+
         category: safeCategory,
         project: safeProject,
+        brandProject: safeBrandProject,
         collection: safeCollection,
+        item: safeItem || null,
         drink: safeDrink || null,
         rarity: safeRarity || null,
         supply: safeSupply,
+
+        vertical: safeVertical,
+        deliveryEnabled: safeDeliveryEnabled,
+        physicalItemIncluded: safePhysicalItemIncluded,
+        officialItem: safeOfficialItem,
+
         proof: safeProofUrl,
         external_url: safeExternalUrl,
         attributes,
@@ -360,9 +397,16 @@ app.post(
         preview: {
           name: metadata.name,
           category: metadata.category,
+          project: metadata.project,
+          brandProject: metadata.brandProject,
           collection: metadata.collection,
+          item: metadata.item,
           drink: metadata.drink,
           rarity: metadata.rarity,
+          vertical: metadata.vertical,
+          deliveryEnabled: metadata.deliveryEnabled,
+          physicalItemIncluded: metadata.physicalItemIncluded,
+          officialItem: metadata.officialItem,
           kind: isVideo ? "video" : "image",
           media: isVideo ? metadata.animation_url : metadata.image,
           poster: isVideo ? metadata.image : null,
@@ -401,7 +445,6 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
       return res.status(500).json({ status: "error", message: "REALIFE_1155_NEW_CONTRACT is missing" });
     }
 
-    // 1) uri(id)
     let tokenUri = "";
     try {
       tokenUri = await client.readContract({
@@ -414,7 +457,6 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
       tokenUri = "";
     }
 
-    // 2) totalSupply(id)
     let totalSupply = 0n;
     try {
       totalSupply = await client.readContract({
@@ -427,7 +469,6 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
       totalSupply = 0n;
     }
 
-    // 3) maxSupply(id)
     let max = 0n;
     try {
       max = await client.readContract({
@@ -440,7 +481,6 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
       max = 0n;
     }
 
-    // 4) creatorOf(id)
     let creator = null;
     try {
       const c = await client.readContract({
@@ -454,7 +494,6 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
       creator = null;
     }
 
-    // 5) fetch original metadata JSON from uri
     let name = `Realife Edition #${tokenId}`;
     let description = "Real-life tokenized on Realife";
     let image = null;
@@ -462,6 +501,10 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
     let originalAttributes = [];
     let category = null;
     let project = null;
+    let collection = null;
+    let item = null;
+    let rarity = null;
+    let brandProject = null;
 
     if (tokenUri) {
       try {
@@ -480,23 +523,25 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
 
         category = originalMetadata.data?.category ?? null;
         project = originalMetadata.data?.project ?? null;
+        collection = originalMetadata.data?.collection ?? null;
+        item = originalMetadata.data?.item ?? null;
+        rarity = originalMetadata.data?.rarity ?? null;
+        brandProject = originalMetadata.data?.brandProject ?? null;
 
         originalAttributes = Array.isArray(originalMetadata.data?.attributes)
           ? originalMetadata.data.attributes
           : [];
 
-        // fallback: if no animation_url but image is a video
         if (!animation_url && image) {
           const ct = await headContentType(ipfsToHttp(image));
           if (ct.startsWith("video/")) animation_url = image;
         }
 
-        // if image equals animation_url, hide image to avoid broken <img>
         if (image && animation_url && String(image).trim() === String(animation_url).trim()) {
           image = null;
         }
       } catch {
-        // ignore
+        //
       }
     }
 
@@ -515,6 +560,10 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
       ...(creator ? [{ trait_type: "Creator", value: creator }] : []),
       ...(category ? [{ trait_type: "Category", value: category }] : []),
       ...(project ? [{ trait_type: "Project", value: project }] : []),
+      ...(brandProject ? [{ trait_type: "Brand Project", value: brandProject }] : []),
+      ...(collection ? [{ trait_type: "Collection", value: collection }] : []),
+      ...(item ? [{ trait_type: "Item", value: item }] : []),
+      ...(rarity ? [{ trait_type: "Rarity", value: rarity }] : []),
       ...(isUnique ? [{ trait_type: "Unique", value: "Yes" }] : []),
       ...originalAttributes,
       { trait_type: "Contract", value: contract1155 },
@@ -526,6 +575,12 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
       description,
       image: imageHttp,
       animation_url: animHttp,
+      category,
+      project,
+      brandProject,
+      collection,
+      item,
+      rarity,
       attributes,
     });
   } catch (err) {
