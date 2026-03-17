@@ -239,6 +239,9 @@ app.post(
         category,
         project,
         brandProject,
+        brand,
+        itemType,
+        deliveryMode,
         supply,
         proofUrl,
         collection,
@@ -311,30 +314,50 @@ app.post(
       const safeDescription = String(description || "").trim();
       const safeCategory = String(category || "Other").trim();
       const safeProject = String(project || "Realife").trim();
+
       const safeBrandProject = String(brandProject || safeProject || "Realife").trim();
+      const safeBrand = String(brand || "").trim() || null;
+
       const safeCollection = String(collection || safeProject || "Realife").trim();
       const safeDrink = String(drink || "").trim();
       const safeItem = String(item || "").trim();
+      const safeItemType = String(itemType || "").trim() || (safeItem || null);
+
       const safeRarity = String(rarity || "").trim();
       const safeSupply = Number(supply) || 1;
       const safeProofUrl = String(proofUrl || "").trim() || null;
       const safeExternalUrl = String(externalUrl || proofUrl || "").trim() || null;
       const safeVertical = String(vertical || "").trim() || null;
 
-      const safeDeliveryEnabled = toBool(deliveryEnabled);
-      const safePhysicalItemIncluded = toBool(physicalItemIncluded);
+      const safeDeliveryMode =
+        String(deliveryMode || "").trim().toLowerCase() === "delivery" ? "delivery" : "none";
+
+      const safeDeliveryEnabled = toBool(deliveryEnabled) || safeDeliveryMode === "delivery";
+      const safePhysicalItemIncluded =
+        toBool(physicalItemIncluded) || safeDeliveryMode === "delivery";
       const safeOfficialItem = toBool(officialItem);
+
+      const shouldIncludeDeliveryAttributes =
+        safeVertical === "store" ||
+        safeVertical === "cafe" ||
+        safeDeliveryMode === "delivery" ||
+        safeDeliveryEnabled ||
+        safePhysicalItemIncluded ||
+        safeOfficialItem;
 
       const attributes = [
         { trait_type: "Collection", value: safeCollection },
         { trait_type: "Project", value: safeProject },
         ...(safeBrandProject ? [{ trait_type: "Brand Project", value: safeBrandProject }] : []),
+        ...(safeBrand ? [{ trait_type: "Brand", value: safeBrand }] : []),
         { trait_type: "Category", value: safeCategory },
         ...(safeItem ? [{ trait_type: "Item", value: safeItem }] : []),
+        ...(safeItemType ? [{ trait_type: "Item Type", value: safeItemType }] : []),
         ...(safeDrink ? [{ trait_type: "Drink", value: safeDrink }] : []),
         ...(safeRarity ? [{ trait_type: "Rarity", value: safeRarity }] : []),
         ...(safeVertical ? [{ trait_type: "Vertical", value: safeVertical }] : []),
-        ...(safeVertical === "store"
+        { trait_type: "Delivery Mode", value: safeDeliveryMode === "delivery" ? "With delivery" : "Without delivery" },
+        ...(shouldIncludeDeliveryAttributes
           ? [
               { trait_type: "Delivery Enabled", value: safeDeliveryEnabled ? "Yes" : "No" },
               {
@@ -354,13 +377,16 @@ app.post(
         category: safeCategory,
         project: safeProject,
         brandProject: safeBrandProject,
+        brand: safeBrand,
         collection: safeCollection,
         item: safeItem || null,
+        itemType: safeItemType || null,
         drink: safeDrink || null,
         rarity: safeRarity || null,
         supply: safeSupply,
 
         vertical: safeVertical,
+        deliveryMode: safeDeliveryMode,
         deliveryEnabled: safeDeliveryEnabled,
         physicalItemIncluded: safePhysicalItemIncluded,
         officialItem: safeOfficialItem,
@@ -399,11 +425,14 @@ app.post(
           category: metadata.category,
           project: metadata.project,
           brandProject: metadata.brandProject,
+          brand: metadata.brand,
           collection: metadata.collection,
           item: metadata.item,
+          itemType: metadata.itemType,
           drink: metadata.drink,
           rarity: metadata.rarity,
           vertical: metadata.vertical,
+          deliveryMode: metadata.deliveryMode,
           deliveryEnabled: metadata.deliveryEnabled,
           physicalItemIncluded: metadata.physicalItemIncluded,
           officialItem: metadata.officialItem,
@@ -503,8 +532,15 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
     let project = null;
     let collection = null;
     let item = null;
+    let itemType = null;
     let rarity = null;
     let brandProject = null;
+    let brand = null;
+    let deliveryMode = "none";
+    let deliveryEnabled = false;
+    let physicalItemIncluded = false;
+    let officialItem = false;
+    let vertical = null;
 
     if (tokenUri) {
       try {
@@ -525,8 +561,20 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
         project = originalMetadata.data?.project ?? null;
         collection = originalMetadata.data?.collection ?? null;
         item = originalMetadata.data?.item ?? null;
+        itemType = originalMetadata.data?.itemType ?? null;
         rarity = originalMetadata.data?.rarity ?? null;
         brandProject = originalMetadata.data?.brandProject ?? null;
+        brand = originalMetadata.data?.brand ?? null;
+        vertical = originalMetadata.data?.vertical ?? null;
+
+        deliveryMode =
+          String(originalMetadata.data?.deliveryMode || "").trim().toLowerCase() === "delivery"
+            ? "delivery"
+            : "none";
+
+        deliveryEnabled = toBool(originalMetadata.data?.deliveryEnabled);
+        physicalItemIncluded = toBool(originalMetadata.data?.physicalItemIncluded);
+        officialItem = toBool(originalMetadata.data?.officialItem);
 
         originalAttributes = Array.isArray(originalMetadata.data?.attributes)
           ? originalMetadata.data.attributes
@@ -561,9 +609,16 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
       ...(category ? [{ trait_type: "Category", value: category }] : []),
       ...(project ? [{ trait_type: "Project", value: project }] : []),
       ...(brandProject ? [{ trait_type: "Brand Project", value: brandProject }] : []),
+      ...(brand ? [{ trait_type: "Brand", value: brand }] : []),
       ...(collection ? [{ trait_type: "Collection", value: collection }] : []),
       ...(item ? [{ trait_type: "Item", value: item }] : []),
+      ...(itemType ? [{ trait_type: "Item Type", value: itemType }] : []),
       ...(rarity ? [{ trait_type: "Rarity", value: rarity }] : []),
+      ...(vertical ? [{ trait_type: "Vertical", value: vertical }] : []),
+      { trait_type: "Delivery Mode", value: deliveryMode === "delivery" ? "With delivery" : "Without delivery" },
+      { trait_type: "Delivery Enabled", value: deliveryEnabled ? "Yes" : "No" },
+      { trait_type: "Physical Item Included", value: physicalItemIncluded ? "Yes" : "No" },
+      { trait_type: "Official Item", value: officialItem ? "Yes" : "No" },
       ...(isUnique ? [{ trait_type: "Unique", value: "Yes" }] : []),
       ...originalAttributes,
       { trait_type: "Contract", value: contract1155 },
@@ -578,9 +633,16 @@ app.get("/metadata1155/:tokenId", async (req, res) => {
       category,
       project,
       brandProject,
+      brand,
       collection,
       item,
+      itemType,
       rarity,
+      vertical,
+      deliveryMode,
+      deliveryEnabled,
+      physicalItemIncluded,
+      officialItem,
       attributes,
     });
   } catch (err) {
