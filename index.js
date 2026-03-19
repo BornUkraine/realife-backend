@@ -18,10 +18,51 @@ const ffmpegPath =
   typeof ffmpegStatic === "string" ? ffmpegStatic : (ffmpegStatic?.default ?? null);
 
 /* =========================
-   ABI (READ-ONLY) — 1155 ONLY
-   Contract: Realife1155New
+   HELPERS
 ========================= */
-const ABI_1155_NEW = [
+function norm(v) {
+  return String(v || "").trim().toLowerCase();
+}
+
+function isAddressLike(v) {
+  return /^0x[a-fA-F0-9]{40}$/.test(String(v || "").trim());
+}
+
+function toBool(v) {
+  if (typeof v === "boolean") return v;
+  const s = String(v ?? "").trim().toLowerCase();
+  return s === "1" || s === "true" || s === "yes" || s === "on";
+}
+
+function uniqueStrings(values) {
+  return Array.from(new Set(values.map((v) => norm(v)).filter(Boolean)));
+}
+
+function resolveContractAlias(raw) {
+  const v = norm(raw);
+
+  if (!v) return "";
+
+  if (v === "standard" || v === "default" || v === "main") {
+    return REALIFE_1155_STANDARD_CONTRACT || "";
+  }
+
+  if (v === "delivery") {
+    return REALIFE_1155_DELIVERY_CONTRACT || "";
+  }
+
+  if (isAddressLike(v)) return v;
+
+  return "";
+}
+
+/* =========================
+   ABI (READ-ONLY) — 1155 ONLY
+   Works for:
+   - Realife1155New
+   - Realife1155Delivery
+========================= */
+const ABI_1155_READ = [
   {
     type: "function",
     name: "uri",
@@ -55,10 +96,9 @@ const ABI_1155_NEW = [
 /* =========================
    IPFS GATEWAY (for reading)
 ========================= */
-const IPFS_GATEWAY_ORIGIN = (process.env.IPFS_GATEWAY_ORIGIN || "https://nftstorage.link").replace(
-  /\/$/,
-  ""
-);
+const IPFS_GATEWAY_ORIGIN = (
+  process.env.IPFS_GATEWAY_ORIGIN || "https://nftstorage.link"
+).replace(/\/$/, "");
 
 function ipfsToHttp(uri) {
   const u = String(uri || "").trim();
@@ -80,7 +120,9 @@ function ipfsToHttp(uri) {
   }
 
   if (u.startsWith("/ipfs/")) return `${IPFS_GATEWAY_ORIGIN}${u}`;
-  if (u.startsWith("Qm") || u.startsWith("bafy")) return `${IPFS_GATEWAY_ORIGIN}/ipfs/${u}`;
+  if (u.startsWith("Qm") || u.startsWith("bafy")) {
+    return `${IPFS_GATEWAY_ORIGIN}/ipfs/${u}`;
+  }
 
   return u;
 }
@@ -98,12 +140,6 @@ async function headContentType(url) {
   }
 }
 
-function toBool(v) {
-  if (typeof v === "boolean") return v;
-  const s = String(v ?? "").trim().toLowerCase();
-  return s === "1" || s === "true" || s === "yes" || s === "on";
-}
-
 /* =========================
    AUTO-POSTER HELPERS (ffmpeg)
    ✅ Install in backend:
@@ -113,10 +149,15 @@ function toBool(v) {
 ========================= */
 async function runFfmpeg(args) {
   if (!ffmpegPath) throw new Error("ffmpeg binary not found (ffmpeg-static)");
+
   await new Promise((resolve, reject) => {
     const p = spawn(ffmpegPath, args);
     let err = "";
-    p.stderr.on("data", (d) => (err += d.toString()));
+
+    p.stderr.on("data", (d) => {
+      err += d.toString();
+    });
+
     p.on("close", (code) => {
       if (code === 0) return resolve();
       reject(new Error(`ffmpeg failed (${code}): ${err || "unknown"}`));
@@ -177,6 +218,317 @@ const client = createPublicClient({
   transport: http(process.env.RPC_URL),
 });
 
+/* =========================
+   KNOWN USER 1155 CONTRACTS
+========================= */
+const REALIFE_1155_STANDARD_CONTRACT = norm(
+  process.env.REALIFE_1155_NEW_CONTRACT || ""
+);
+
+const REALIFE_1155_DELIVERY_CONTRACT = norm(
+  process.env.REALIFE_1155_DELIVERY_CONTRACT || ""
+);
+
+const KNOWN_1155_CONTRACTS = uniqueStrings([
+  REALIFE_1155_STANDARD_CONTRACT,
+  REALIFE_1155_DELIVERY_CONTRACT,
+]);
+
+async function readContractSafe(address, functionName, args, fallback = null) {
+  try {
+    return await client.readContract({
+      address,
+      abi: ABI_1155_READ,
+      functionName,
+      args,
+    });
+  } catch {
+    return fallback;
+  }
+}
+
+async function probe1155Token(contractAddress, tokenId) {
+  const uri = await readContractSafe(contractAddress, "uri", [tokenId], "");
+  const totalSupply = await readContractSafe(contractAddress, "totalSupply", [tokenId], 0n);
+  const maxSupply = await readContractSafe(contractAddress, "maxSupply", [tokenId], 0n);
+
+  return {
+    contract: norm(contractAddress),
+    uri: String(uri || "").trim(),
+    totalSupply: totalSupply ?? 0n,
+    maxSupply: maxSupply ?? 0n,
+    exists:
+      Boolean(String(uri || "").trim()) ||
+      BigInt(totalSupply || 0n) > 0n ||
+      BigInt(maxSupply || 0n) > 0n,
+  };
+}
+
+async function resolve1155ContractForToken(tokenId, preferredContract = "") {
+  const preferred = resolveContractAlias(preferredContract);
+
+  if (preferred && KNOWN_1155_CONTRACTS.includes(preferred)) {
+    return preferred;
+  }
+
+  if (KNOWN_1155_CONTRACTS.length === 0) {
+    return "";
+  }
+
+  if (KNOWN_1155_CONTRACTS.length === 1) {
+    return KNOWN_1155_CONTRACTS[0];
+  }
+
+  // Prefer legacy standard contract first for backward compatibility
+  const candidates = uniqueStrings([
+    REALIFE_1155_STANDARD_CONTRACT,
+    REALIFE_1155_DELIVERY_CONTRACT,
+  ]);
+
+  for (const c of candidates) {
+    const probe = await probe1155Token(c, tokenId);
+    if (probe.exists) return c;
+  }
+
+  // fallback
+  return REALIFE_1155_STANDARD_CONTRACT || REALIFE_1155_DELIVERY_CONTRACT || "";
+}
+
+async function build1155MetadataResponse(contract1155, tokenId) {
+  let tokenUri = "";
+  try {
+    tokenUri = await client.readContract({
+      address: contract1155,
+      abi: ABI_1155_READ,
+      functionName: "uri",
+      args: [tokenId],
+    });
+  } catch {
+    tokenUri = "";
+  }
+
+  let totalSupply = 0n;
+  try {
+    totalSupply = await client.readContract({
+      address: contract1155,
+      abi: ABI_1155_READ,
+      functionName: "totalSupply",
+      args: [tokenId],
+    });
+  } catch {
+    totalSupply = 0n;
+  }
+
+  let max = 0n;
+  try {
+    max = await client.readContract({
+      address: contract1155,
+      abi: ABI_1155_READ,
+      functionName: "maxSupply",
+      args: [tokenId],
+    });
+  } catch {
+    max = 0n;
+  }
+
+  let creator = null;
+  try {
+    const c = await client.readContract({
+      address: contract1155,
+      abi: ABI_1155_READ,
+      functionName: "creatorOf",
+      args: [tokenId],
+    });
+    creator = c ? String(c) : null;
+  } catch {
+    creator = null;
+  }
+
+  let name = `Realife Edition #${tokenId}`;
+  let description = "Real-life tokenized on Realife";
+  let image = null;
+  let animation_url = null;
+  let originalAttributes = [];
+  let category = null;
+  let project = null;
+  let collection = null;
+  let item = null;
+  let itemType = null;
+  let rarity = null;
+  let brandProject = null;
+  let brand = null;
+  let deliveryMode = "none";
+  let deliveryEnabled = false;
+  let physicalItemIncluded = false;
+  let officialItem = false;
+  let vertical = null;
+  let proof = null;
+  let external_url = null;
+
+  if (tokenUri) {
+    try {
+      const metadataUrl = ipfsToHttp(tokenUri);
+      const originalMetadata = await axios.get(metadataUrl, { timeout: 12_000 });
+
+      name = originalMetadata.data?.name ?? name;
+      description = originalMetadata.data?.description ?? description;
+
+      image = originalMetadata.data?.image ?? image;
+      animation_url =
+        originalMetadata.data?.animation_url ??
+        originalMetadata.data?.animationUrl ??
+        originalMetadata.data?.animation ??
+        null;
+
+      category = originalMetadata.data?.category ?? null;
+      project = originalMetadata.data?.project ?? null;
+      collection = originalMetadata.data?.collection ?? null;
+      item = originalMetadata.data?.item ?? null;
+      itemType = originalMetadata.data?.itemType ?? null;
+      rarity = originalMetadata.data?.rarity ?? null;
+      brandProject = originalMetadata.data?.brandProject ?? null;
+      brand = originalMetadata.data?.brand ?? null;
+      vertical = originalMetadata.data?.vertical ?? null;
+      proof = originalMetadata.data?.proof ?? null;
+      external_url = originalMetadata.data?.external_url ?? null;
+
+      deliveryMode =
+        String(originalMetadata.data?.deliveryMode || "").trim().toLowerCase() === "delivery"
+          ? "delivery"
+          : "none";
+
+      deliveryEnabled = toBool(originalMetadata.data?.deliveryEnabled);
+      physicalItemIncluded = toBool(originalMetadata.data?.physicalItemIncluded);
+      officialItem = toBool(originalMetadata.data?.officialItem);
+
+      originalAttributes = Array.isArray(originalMetadata.data?.attributes)
+        ? originalMetadata.data.attributes
+        : [];
+
+      if (!animation_url && image) {
+        const ct = await headContentType(ipfsToHttp(image));
+        if (ct.startsWith("video/")) animation_url = image;
+      }
+
+      if (
+        image &&
+        animation_url &&
+        String(image).trim() === String(animation_url).trim()
+      ) {
+        image = null;
+      }
+    } catch {
+      //
+    }
+  }
+
+  const block = await client.getBlock();
+
+  const imageHttp = image ? ipfsToHttp(image) : null;
+  const animHttp = animation_url ? ipfsToHttp(animation_url) : null;
+
+  const isUnique = max === 1n;
+
+  const attributes = [
+    { trait_type: "Standard", value: "ERC1155" },
+    { trait_type: "Token ID", value: tokenId.toString() },
+    { trait_type: "Total Supply", value: totalSupply.toString() },
+    ...(max > 0n ? [{ trait_type: "Max Supply", value: max.toString() }] : []),
+    ...(creator ? [{ trait_type: "Creator", value: creator }] : []),
+    ...(category ? [{ trait_type: "Category", value: category }] : []),
+    ...(project ? [{ trait_type: "Project", value: project }] : []),
+    ...(brandProject ? [{ trait_type: "Brand Project", value: brandProject }] : []),
+    ...(brand ? [{ trait_type: "Brand", value: brand }] : []),
+    ...(collection ? [{ trait_type: "Collection", value: collection }] : []),
+    ...(item ? [{ trait_type: "Item", value: item }] : []),
+    ...(itemType ? [{ trait_type: "Item Type", value: itemType }] : []),
+    ...(rarity ? [{ trait_type: "Rarity", value: rarity }] : []),
+    ...(vertical ? [{ trait_type: "Vertical", value: vertical }] : []),
+    {
+      trait_type: "Delivery Mode",
+      value: deliveryMode === "delivery" ? "With delivery" : "Without delivery",
+    },
+    { trait_type: "Delivery Enabled", value: deliveryEnabled ? "Yes" : "No" },
+    {
+      trait_type: "Physical Item Included",
+      value: physicalItemIncluded ? "Yes" : "No",
+    },
+    { trait_type: "Official Item", value: officialItem ? "Yes" : "No" },
+    ...(isUnique ? [{ trait_type: "Unique", value: "Yes" }] : []),
+    ...originalAttributes,
+    { trait_type: "Contract", value: contract1155 },
+    {
+      trait_type: "Last Updated",
+      value: new Date(Number(block.timestamp) * 1000).toISOString(),
+    },
+  ];
+
+  return {
+    contract: contract1155,
+    tokenId: tokenId.toString(),
+    tokenUri: tokenUri || null,
+
+    name,
+    description,
+    image: imageHttp,
+    animation_url: animHttp,
+
+    category,
+    project,
+    brandProject,
+    brand,
+    collection,
+    item,
+    itemType,
+    rarity,
+    vertical,
+
+    proof,
+    external_url,
+
+    deliveryMode,
+    deliveryEnabled,
+    physicalItemIncluded,
+    officialItem,
+
+    attributes,
+  };
+}
+
+async function handleMetadata1155(req, res, explicitContractRaw = "") {
+  try {
+    res.set({
+      "Cache-Control": "public, max-age=60, s-maxage=60, must-revalidate",
+    });
+
+    let tokenId;
+    try {
+      tokenId = BigInt(req.params.tokenId);
+    } catch {
+      return res.status(400).json({ status: "error", message: "Invalid tokenId" });
+    }
+
+    const queryContract = String(req.query?.contract || "").trim();
+    const preferredContract = explicitContractRaw || queryContract || "";
+
+    const contract1155 = await resolve1155ContractForToken(tokenId, preferredContract);
+
+    if (!contract1155) {
+      return res.status(500).json({
+        status: "error",
+        message:
+          "No 1155 contract configured. Set REALIFE_1155_NEW_CONTRACT and/or REALIFE_1155_DELIVERY_CONTRACT",
+      });
+    }
+
+    const payload = await build1155MetadataResponse(contract1155, tokenId);
+    return res.json(payload);
+  } catch (err) {
+    console.error("METADATA1155 ERROR:", err);
+    return res.status(500).json({ status: "error" });
+  }
+}
+
 const app = express();
 
 /* =========================
@@ -197,7 +549,15 @@ const upload = multer({
    HEALTH CHECK
 ========================= */
 app.get("/", (_req, res) => {
-  res.json({ status: "ok", service: "accurate-art", message: "Backend is running" });
+  res.json({
+    status: "ok",
+    service: "accurate-art",
+    message: "Backend is running",
+    contracts: {
+      standard1155: REALIFE_1155_STANDARD_CONTRACT || null,
+      delivery1155: REALIFE_1155_DELIVERY_CONTRACT || null,
+    },
+  });
 });
 
 /* =========================
@@ -207,13 +567,17 @@ async function pinFileToIpfs(buffer, filename, jwt) {
   const fileForm = new FormData();
   fileForm.append("file", buffer, filename);
 
-  const r = await axios.post("https://api.pinata.cloud/pinning/pinFileToIPFS", fileForm, {
-    maxBodyLength: Infinity,
-    headers: {
-      ...fileForm.getHeaders(),
-      Authorization: `Bearer ${jwt}`,
-    },
-  });
+  const r = await axios.post(
+    "https://api.pinata.cloud/pinning/pinFileToIPFS",
+    fileForm,
+    {
+      maxBodyLength: Infinity,
+      headers: {
+        ...fileForm.getHeaders(),
+        Authorization: `Bearer ${jwt}`,
+      },
+    }
+  );
 
   const cid = r.data?.IpfsHash;
   if (!cid) throw new Error("Pinata pinFileToIPFS: missing IpfsHash");
@@ -261,17 +625,26 @@ app.post(
       const posterFile = posterArr[0] || null;
 
       if (!name || !file) {
-        return res.status(400).json({ status: "error", message: "Name and file are required" });
+        return res
+          .status(400)
+          .json({ status: "error", message: "Name and file are required" });
       }
+
       if (!process.env.PINATA_JWT) {
-        return res.status(500).json({ status: "error", message: "PINATA_JWT is missing" });
+        return res
+          .status(500)
+          .json({ status: "error", message: "PINATA_JWT is missing" });
       }
 
       const isVideo = String(file.mimetype || "").startsWith("video/");
-      const isPosterOk = posterFile ? String(posterFile.mimetype || "").startsWith("image/") : false;
+      const isPosterOk = posterFile
+        ? String(posterFile.mimetype || "").startsWith("image/")
+        : false;
 
       if (posterFile && !isPosterOk) {
-        return res.status(400).json({ status: "error", message: "Poster must be an image file" });
+        return res
+          .status(400)
+          .json({ status: "error", message: "Poster must be an image file" });
       }
 
       /* ========= 1️⃣ Upload main file ========= */
@@ -294,7 +667,11 @@ app.post(
         } else {
           try {
             const posterBuf = await makePosterFromVideo(file.buffer);
-            posterUri = await pinFileToIpfs(posterBuf, "poster.jpg", process.env.PINATA_JWT);
+            posterUri = await pinFileToIpfs(
+              posterBuf,
+              "poster.jpg",
+              process.env.PINATA_JWT
+            );
           } catch {
             posterUri = process.env.DEFAULT_VIDEO_POSTER || null;
           }
@@ -315,13 +692,15 @@ app.post(
       const safeCategory = String(category || "Other").trim();
       const safeProject = String(project || "Realife").trim();
 
-      const safeBrandProject = String(brandProject || safeProject || "Realife").trim();
+      const safeBrandProject = String(
+        brandProject || safeProject || "Realife"
+      ).trim();
       const safeBrand = String(brand || "").trim() || null;
 
       const safeCollection = String(collection || safeProject || "Realife").trim();
       const safeDrink = String(drink || "").trim();
       const safeItem = String(item || "").trim();
-      const safeItemType = String(itemType || "").trim() || (safeItem || null);
+      const safeItemType = String(itemType || "").trim() || safeItem || null;
 
       const safeRarity = String(rarity || "").trim();
       const safeSupply = Number(supply) || 1;
@@ -330,11 +709,16 @@ app.post(
       const safeVertical = String(vertical || "").trim() || null;
 
       const safeDeliveryMode =
-        String(deliveryMode || "").trim().toLowerCase() === "delivery" ? "delivery" : "none";
+        String(deliveryMode || "").trim().toLowerCase() === "delivery"
+          ? "delivery"
+          : "none";
 
-      const safeDeliveryEnabled = toBool(deliveryEnabled) || safeDeliveryMode === "delivery";
+      const safeDeliveryEnabled =
+        toBool(deliveryEnabled) || safeDeliveryMode === "delivery";
+
       const safePhysicalItemIncluded =
         toBool(physicalItemIncluded) || safeDeliveryMode === "delivery";
+
       const safeOfficialItem = toBool(officialItem);
 
       const shouldIncludeDeliveryAttributes =
@@ -348,7 +732,9 @@ app.post(
       const attributes = [
         { trait_type: "Collection", value: safeCollection },
         { trait_type: "Project", value: safeProject },
-        ...(safeBrandProject ? [{ trait_type: "Brand Project", value: safeBrandProject }] : []),
+        ...(safeBrandProject
+          ? [{ trait_type: "Brand Project", value: safeBrandProject }]
+          : []),
         ...(safeBrand ? [{ trait_type: "Brand", value: safeBrand }] : []),
         { trait_type: "Category", value: safeCategory },
         ...(safeItem ? [{ trait_type: "Item", value: safeItem }] : []),
@@ -356,15 +742,27 @@ app.post(
         ...(safeDrink ? [{ trait_type: "Drink", value: safeDrink }] : []),
         ...(safeRarity ? [{ trait_type: "Rarity", value: safeRarity }] : []),
         ...(safeVertical ? [{ trait_type: "Vertical", value: safeVertical }] : []),
-        { trait_type: "Delivery Mode", value: safeDeliveryMode === "delivery" ? "With delivery" : "Without delivery" },
+        {
+          trait_type: "Delivery Mode",
+          value:
+            safeDeliveryMode === "delivery"
+              ? "With delivery"
+              : "Without delivery",
+        },
         ...(shouldIncludeDeliveryAttributes
           ? [
-              { trait_type: "Delivery Enabled", value: safeDeliveryEnabled ? "Yes" : "No" },
+              {
+                trait_type: "Delivery Enabled",
+                value: safeDeliveryEnabled ? "Yes" : "No",
+              },
               {
                 trait_type: "Physical Item Included",
                 value: safePhysicalItemIncluded ? "Yes" : "No",
               },
-              { trait_type: "Official Item", value: safeOfficialItem ? "Yes" : "No" },
+              {
+                trait_type: "Official Item",
+                value: safeOfficialItem ? "Yes" : "No",
+              },
             ]
           : []),
         { trait_type: "Supply", value: String(safeSupply) },
@@ -404,15 +802,22 @@ app.post(
       }
 
       /* ========= 4️⃣ Upload METADATA ========= */
-      const metadataUpload = await axios.post("https://api.pinata.cloud/pinning/pinJSONToIPFS", metadata, {
-        headers: {
-          Authorization: `Bearer ${process.env.PINATA_JWT}`,
-          "Content-Type": "application/json",
-        },
-      });
+      const metadataUpload = await axios.post(
+        "https://api.pinata.cloud/pinning/pinJSONToIPFS",
+        metadata,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.PINATA_JWT}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
 
       const metadataCid = metadataUpload.data?.IpfsHash;
-      if (!metadataCid) throw new Error("Pinata pinJSONToIPFS: missing IpfsHash");
+      if (!metadataCid) {
+        throw new Error("Pinata pinJSONToIPFS: missing IpfsHash");
+      }
+
       const metadataUri = `ipfs://${metadataCid}`;
 
       /* ========= 5️⃣ RESPONSE ========= */
@@ -445,210 +850,28 @@ app.post(
       });
     } catch (err) {
       console.error("MINT PREPARE ERROR:", err?.message || err);
-      return res.status(500).json({ status: "error", message: "Mint preparation failed" });
+      return res
+        .status(500)
+        .json({ status: "error", message: "Mint preparation failed" });
     }
   }
 );
 
 /* =========================
-   DYNAMIC NFT METADATA (ERC-1155) — NEW CONTRACT
-   GET /metadata1155/:tokenId
-   - reads uri(id)
-   - reads totalSupply(id)
-   - reads maxSupply(id)
-   - reads creatorOf(id)
+   DYNAMIC NFT METADATA (ERC-1155)
+   NEW:
+   - GET /metadata1155/:contract/:tokenId
+   LEGACY:
+   - GET /metadata1155/:tokenId
+   - GET /metadata1155/:tokenId?contract=0x...
 ========================= */
+app.get("/metadata1155/:contract/:tokenId", async (req, res) => {
+  const explicitContract = String(req.params.contract || "").trim();
+  return handleMetadata1155(req, res, explicitContract);
+});
+
 app.get("/metadata1155/:tokenId", async (req, res) => {
-  try {
-    res.set({ "Cache-Control": "public, max-age=60, s-maxage=60, must-revalidate" });
-
-    let tokenId;
-    try {
-      tokenId = BigInt(req.params.tokenId);
-    } catch {
-      return res.status(400).json({ status: "error", message: "Invalid tokenId" });
-    }
-
-    const contract1155 = process.env.REALIFE_1155_NEW_CONTRACT;
-    if (!contract1155) {
-      return res.status(500).json({ status: "error", message: "REALIFE_1155_NEW_CONTRACT is missing" });
-    }
-
-    let tokenUri = "";
-    try {
-      tokenUri = await client.readContract({
-        address: contract1155,
-        abi: ABI_1155_NEW,
-        functionName: "uri",
-        args: [tokenId],
-      });
-    } catch {
-      tokenUri = "";
-    }
-
-    let totalSupply = 0n;
-    try {
-      totalSupply = await client.readContract({
-        address: contract1155,
-        abi: ABI_1155_NEW,
-        functionName: "totalSupply",
-        args: [tokenId],
-      });
-    } catch {
-      totalSupply = 0n;
-    }
-
-    let max = 0n;
-    try {
-      max = await client.readContract({
-        address: contract1155,
-        abi: ABI_1155_NEW,
-        functionName: "maxSupply",
-        args: [tokenId],
-      });
-    } catch {
-      max = 0n;
-    }
-
-    let creator = null;
-    try {
-      const c = await client.readContract({
-        address: contract1155,
-        abi: ABI_1155_NEW,
-        functionName: "creatorOf",
-        args: [tokenId],
-      });
-      creator = c ? String(c) : null;
-    } catch {
-      creator = null;
-    }
-
-    let name = `Realife Edition #${tokenId}`;
-    let description = "Real-life tokenized on Realife";
-    let image = null;
-    let animation_url = null;
-    let originalAttributes = [];
-    let category = null;
-    let project = null;
-    let collection = null;
-    let item = null;
-    let itemType = null;
-    let rarity = null;
-    let brandProject = null;
-    let brand = null;
-    let deliveryMode = "none";
-    let deliveryEnabled = false;
-    let physicalItemIncluded = false;
-    let officialItem = false;
-    let vertical = null;
-
-    if (tokenUri) {
-      try {
-        const metadataUrl = ipfsToHttp(tokenUri);
-        const originalMetadata = await axios.get(metadataUrl, { timeout: 12_000 });
-
-        name = originalMetadata.data?.name ?? name;
-        description = originalMetadata.data?.description ?? description;
-
-        image = originalMetadata.data?.image ?? image;
-        animation_url =
-          originalMetadata.data?.animation_url ??
-          originalMetadata.data?.animationUrl ??
-          originalMetadata.data?.animation ??
-          null;
-
-        category = originalMetadata.data?.category ?? null;
-        project = originalMetadata.data?.project ?? null;
-        collection = originalMetadata.data?.collection ?? null;
-        item = originalMetadata.data?.item ?? null;
-        itemType = originalMetadata.data?.itemType ?? null;
-        rarity = originalMetadata.data?.rarity ?? null;
-        brandProject = originalMetadata.data?.brandProject ?? null;
-        brand = originalMetadata.data?.brand ?? null;
-        vertical = originalMetadata.data?.vertical ?? null;
-
-        deliveryMode =
-          String(originalMetadata.data?.deliveryMode || "").trim().toLowerCase() === "delivery"
-            ? "delivery"
-            : "none";
-
-        deliveryEnabled = toBool(originalMetadata.data?.deliveryEnabled);
-        physicalItemIncluded = toBool(originalMetadata.data?.physicalItemIncluded);
-        officialItem = toBool(originalMetadata.data?.officialItem);
-
-        originalAttributes = Array.isArray(originalMetadata.data?.attributes)
-          ? originalMetadata.data.attributes
-          : [];
-
-        if (!animation_url && image) {
-          const ct = await headContentType(ipfsToHttp(image));
-          if (ct.startsWith("video/")) animation_url = image;
-        }
-
-        if (image && animation_url && String(image).trim() === String(animation_url).trim()) {
-          image = null;
-        }
-      } catch {
-        //
-      }
-    }
-
-    const block = await client.getBlock();
-
-    const imageHttp = image ? ipfsToHttp(image) : null;
-    const animHttp = animation_url ? ipfsToHttp(animation_url) : null;
-
-    const isUnique = max === 1n;
-
-    const attributes = [
-      { trait_type: "Standard", value: "ERC1155" },
-      { trait_type: "Token ID", value: tokenId.toString() },
-      { trait_type: "Total Supply", value: totalSupply.toString() },
-      ...(max > 0n ? [{ trait_type: "Max Supply", value: max.toString() }] : []),
-      ...(creator ? [{ trait_type: "Creator", value: creator }] : []),
-      ...(category ? [{ trait_type: "Category", value: category }] : []),
-      ...(project ? [{ trait_type: "Project", value: project }] : []),
-      ...(brandProject ? [{ trait_type: "Brand Project", value: brandProject }] : []),
-      ...(brand ? [{ trait_type: "Brand", value: brand }] : []),
-      ...(collection ? [{ trait_type: "Collection", value: collection }] : []),
-      ...(item ? [{ trait_type: "Item", value: item }] : []),
-      ...(itemType ? [{ trait_type: "Item Type", value: itemType }] : []),
-      ...(rarity ? [{ trait_type: "Rarity", value: rarity }] : []),
-      ...(vertical ? [{ trait_type: "Vertical", value: vertical }] : []),
-      { trait_type: "Delivery Mode", value: deliveryMode === "delivery" ? "With delivery" : "Without delivery" },
-      { trait_type: "Delivery Enabled", value: deliveryEnabled ? "Yes" : "No" },
-      { trait_type: "Physical Item Included", value: physicalItemIncluded ? "Yes" : "No" },
-      { trait_type: "Official Item", value: officialItem ? "Yes" : "No" },
-      ...(isUnique ? [{ trait_type: "Unique", value: "Yes" }] : []),
-      ...originalAttributes,
-      { trait_type: "Contract", value: contract1155 },
-      { trait_type: "Last Updated", value: new Date(Number(block.timestamp) * 1000).toISOString() },
-    ];
-
-    return res.json({
-      name,
-      description,
-      image: imageHttp,
-      animation_url: animHttp,
-      category,
-      project,
-      brandProject,
-      brand,
-      collection,
-      item,
-      itemType,
-      rarity,
-      vertical,
-      deliveryMode,
-      deliveryEnabled,
-      physicalItemIncluded,
-      officialItem,
-      attributes,
-    });
-  } catch (err) {
-    console.error("METADATA1155 ERROR:", err);
-    return res.status(500).json({ status: "error" });
-  }
+  return handleMetadata1155(req, res, "");
 });
 
 /* =========================
