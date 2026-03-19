@@ -15,7 +15,9 @@ import ffmpegStatic from "ffmpeg-static";
 
 // ✅ robust ESM import for ffmpeg-static
 const ffmpegPath =
-  typeof ffmpegStatic === "string" ? ffmpegStatic : (ffmpegStatic?.default ?? null);
+  typeof ffmpegStatic === "string"
+    ? ffmpegStatic
+    : ffmpegStatic?.default ?? null;
 
 /* =========================
    HELPERS
@@ -26,6 +28,11 @@ function norm(v) {
 
 function isAddressLike(v) {
   return /^0x[a-fA-F0-9]{40}$/.test(String(v || "").trim());
+}
+
+function isNonZeroAddress(v) {
+  const s = norm(v);
+  return isAddressLike(s) && s !== "0x0000000000000000000000000000000000000000";
 }
 
 function toBool(v) {
@@ -40,7 +47,6 @@ function uniqueStrings(values) {
 
 function resolveContractAlias(raw) {
   const v = norm(raw);
-
   if (!v) return "";
 
   if (v === "standard" || v === "default" || v === "main") {
@@ -51,8 +57,7 @@ function resolveContractAlias(raw) {
     return REALIFE_1155_DELIVERY_CONTRACT || "";
   }
 
-  if (isAddressLike(v)) return v;
-
+  if (isAddressLike(v)) return norm(v);
   return "";
 }
 
@@ -209,24 +214,29 @@ async function makePosterFromVideo(videoBuffer) {
 /* =========================
    BLOCKCHAIN CLIENT
 ========================= */
-if (!process.env.RPC_URL) {
-  throw new Error("RPC_URL is missing");
-}
+const RPC_URL =
+  process.env.RPC_URL ||
+  process.env.BASE_SEPOLIA_RPC ||
+  "https://sepolia.base.org";
 
 const client = createPublicClient({
   chain: baseSepolia,
-  transport: http(process.env.RPC_URL),
+  transport: http(RPC_URL),
 });
 
 /* =========================
    KNOWN USER 1155 CONTRACTS
 ========================= */
 const REALIFE_1155_STANDARD_CONTRACT = norm(
-  process.env.REALIFE_1155_NEW_CONTRACT || ""
+  process.env.REALIFE_1155_NEW_CONTRACT ||
+    process.env.NEXT_PUBLIC_REALIFE_1155_NEW_CONTRACT ||
+    ""
 );
 
 const REALIFE_1155_DELIVERY_CONTRACT = norm(
-  process.env.REALIFE_1155_DELIVERY_CONTRACT || ""
+  process.env.REALIFE_1155_DELIVERY_CONTRACT ||
+    process.env.NEXT_PUBLIC_REALIFE_1155_DELIVERY_CONTRACT ||
+    ""
 );
 
 const KNOWN_1155_CONTRACTS = uniqueStrings([
@@ -248,26 +258,50 @@ async function readContractSafe(address, functionName, args, fallback = null) {
 }
 
 async function probe1155Token(contractAddress, tokenId) {
+  const totalSupply = await readContractSafe(
+    contractAddress,
+    "totalSupply",
+    [tokenId],
+    0n
+  );
+
+  const maxSupply = await readContractSafe(
+    contractAddress,
+    "maxSupply",
+    [tokenId],
+    0n
+  );
+
+  const creatorRaw = await readContractSafe(
+    contractAddress,
+    "creatorOf",
+    [tokenId],
+    null
+  );
+
   const uri = await readContractSafe(contractAddress, "uri", [tokenId], "");
-  const totalSupply = await readContractSafe(contractAddress, "totalSupply", [tokenId], 0n);
-  const maxSupply = await readContractSafe(contractAddress, "maxSupply", [tokenId], 0n);
+
+  const creator = creatorRaw ? String(creatorRaw) : null;
+
+  const exists =
+    BigInt(totalSupply || 0n) > 0n ||
+    BigInt(maxSupply || 0n) > 0n ||
+    isNonZeroAddress(creator);
 
   return {
     contract: norm(contractAddress),
     uri: String(uri || "").trim(),
     totalSupply: totalSupply ?? 0n,
     maxSupply: maxSupply ?? 0n,
-    exists:
-      Boolean(String(uri || "").trim()) ||
-      BigInt(totalSupply || 0n) > 0n ||
-      BigInt(maxSupply || 0n) > 0n,
+    creator,
+    exists,
   };
 }
 
-async function resolve1155ContractForToken(tokenId, preferredContract = "") {
-  const preferred = resolveContractAlias(preferredContract);
+async function resolve1155ContractForToken(tokenId, preferredContractRaw = "") {
+  const preferred = resolveContractAlias(preferredContractRaw);
 
-  if (preferred && KNOWN_1155_CONTRACTS.includes(preferred)) {
+  if (preferred && isAddressLike(preferred)) {
     return preferred;
   }
 
@@ -279,18 +313,17 @@ async function resolve1155ContractForToken(tokenId, preferredContract = "") {
     return KNOWN_1155_CONTRACTS[0];
   }
 
-  // Prefer legacy standard contract first for backward compatibility
   const candidates = uniqueStrings([
     REALIFE_1155_STANDARD_CONTRACT,
     REALIFE_1155_DELIVERY_CONTRACT,
   ]);
 
   for (const c of candidates) {
+    if (!c) continue;
     const probe = await probe1155Token(c, tokenId);
     if (probe.exists) return c;
   }
 
-  // fallback
   return REALIFE_1155_STANDARD_CONTRACT || REALIFE_1155_DELIVERY_CONTRACT || "";
 }
 
@@ -393,7 +426,9 @@ async function build1155MetadataResponse(contract1155, tokenId) {
       external_url = originalMetadata.data?.external_url ?? null;
 
       deliveryMode =
-        String(originalMetadata.data?.deliveryMode || "").trim().toLowerCase() === "delivery"
+        String(originalMetadata.data?.deliveryMode || "")
+          .trim()
+          .toLowerCase() === "delivery"
           ? "delivery"
           : "none";
 
@@ -511,7 +546,10 @@ async function handleMetadata1155(req, res, explicitContractRaw = "") {
     const queryContract = String(req.query?.contract || "").trim();
     const preferredContract = explicitContractRaw || queryContract || "";
 
-    const contract1155 = await resolve1155ContractForToken(tokenId, preferredContract);
+    const contract1155 = await resolve1155ContractForToken(
+      tokenId,
+      preferredContract
+    );
 
     if (!contract1155) {
       return res.status(500).json({
@@ -553,6 +591,7 @@ app.get("/", (_req, res) => {
     status: "ok",
     service: "accurate-art",
     message: "Backend is running",
+    rpcUrl: RPC_URL,
     contracts: {
       standard1155: REALIFE_1155_STANDARD_CONTRACT || null,
       delivery1155: REALIFE_1155_DELIVERY_CONTRACT || null,
@@ -881,4 +920,8 @@ const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
   console.log(`accurate-art running on port ${PORT}`);
+  console.log("[1155 contracts]", {
+    standard: REALIFE_1155_STANDARD_CONTRACT || null,
+    delivery: REALIFE_1155_DELIVERY_CONTRACT || null,
+  });
 });
