@@ -61,6 +61,11 @@ function resolveContractAlias(raw) {
   return "";
 }
 
+function safeTrim(v) {
+  const s = String(v || "").trim();
+  return s || null;
+}
+
 function normalizeFulfillmentType(v) {
   const s = String(v || "").trim().toLowerCase();
   if (!s) return null;
@@ -123,11 +128,6 @@ function inferSuggestedMarketType({
   if (fulfillmentType) return "protected";
   if (deliveryEnabled || physicalItemIncluded) return "protected";
   return "standard";
-}
-
-function safeTrim(v) {
-  const s = String(v || "").trim();
-  return s || null;
 }
 
 /* =========================
@@ -216,6 +216,10 @@ async function headContentType(url) {
 
 /* =========================
    AUTO-POSTER HELPERS (ffmpeg)
+   ✅ Install in backend:
+      npm i ffmpeg-static
+   ✅ Optional env fallback:
+      DEFAULT_VIDEO_POSTER = ipfs://<CID>   (must be IMAGE)
 ========================= */
 async function runFfmpeg(args) {
   if (!ffmpegPath) throw new Error("ffmpeg binary not found (ffmpeg-static)");
@@ -290,7 +294,7 @@ const client = createPublicClient({
 });
 
 /* =========================
-   KNOWN CONTRACTS
+   KNOWN USER 1155 CONTRACTS
 ========================= */
 const REALIFE_1155_STANDARD_CONTRACT = norm(
   process.env.REALIFE_1155_NEW_CONTRACT ||
@@ -301,15 +305,6 @@ const REALIFE_1155_STANDARD_CONTRACT = norm(
 const REALIFE_1155_DELIVERY_CONTRACT = norm(
   process.env.REALIFE_1155_DELIVERY_CONTRACT ||
     process.env.NEXT_PUBLIC_REALIFE_1155_DELIVERY_CONTRACT ||
-    ""
-);
-
-const REALIFE_PROTECTED_MARKETPLACE_CONTRACT = norm(
-  process.env.REALIFE_PROTECTED_MARKETPLACE_CONTRACT ||
-    process.env.NEXT_PUBLIC_REALIFE_PROTECTED_MARKETPLACE_CONTRACT ||
-    process.env.PROTECTED_MARKETPLACE_ADDRESS ||
-    process.env.REALIFE_MARKETPLACE_PROTECTED_ADDRESS ||
-    process.env.MARKETPLACE_PROTECTED_ADDRESS ||
     ""
 );
 
@@ -456,7 +451,6 @@ async function build1155MetadataResponse(contract1155, tokenId) {
   let image = null;
   let animation_url = null;
   let originalAttributes = [];
-
   let category = null;
   let subcategory = null;
   let project = null;
@@ -569,14 +563,12 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     { trait_type: "Total Supply", value: totalSupply.toString() },
     ...(max > 0n ? [{ trait_type: "Max Supply", value: max.toString() }] : []),
     ...(creator ? [{ trait_type: "Creator", value: creator }] : []),
-    ...(collection ? [{ trait_type: "Collection", value: collection }] : []),
-    ...(project ? [{ trait_type: "Project", value: project }] : []),
-    ...(brandProject
-      ? [{ trait_type: "Brand Project", value: brandProject }]
-      : []),
-    ...(brand ? [{ trait_type: "Brand", value: brand }] : []),
     ...(category ? [{ trait_type: "Category", value: category }] : []),
     ...(subcategory ? [{ trait_type: "Subcategory", value: subcategory }] : []),
+    ...(project ? [{ trait_type: "Project", value: project }] : []),
+    ...(brandProject ? [{ trait_type: "Brand Project", value: brandProject }] : []),
+    ...(brand ? [{ trait_type: "Brand", value: brand }] : []),
+    ...(collection ? [{ trait_type: "Collection", value: collection }] : []),
     ...(item ? [{ trait_type: "Item", value: item }] : []),
     ...(itemType ? [{ trait_type: "Item Type", value: itemType }] : []),
     ...(rarity ? [{ trait_type: "Rarity", value: rarity }] : []),
@@ -698,7 +690,7 @@ app.use(express.json());
 ========================= */
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 },
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
 });
 
 /* =========================
@@ -713,7 +705,6 @@ app.get("/", (_req, res) => {
     contracts: {
       standard1155: REALIFE_1155_STANDARD_CONTRACT || null,
       delivery1155: REALIFE_1155_DELIVERY_CONTRACT || null,
-      protectedMarketplace: REALIFE_PROTECTED_MARKETPLACE_CONTRACT || null,
     },
   });
 });
@@ -744,6 +735,8 @@ async function pinFileToIpfs(buffer, filename, jwt) {
 
 /* =========================
    MINT PREPARE (UPLOAD + METADATA)
+   - Returns tokenURI (metadataUri)
+   - Frontend calls 1155 contract createEdition(supply, tokenURI)
 ========================= */
 app.post(
   "/api/mint/prepare",
@@ -805,12 +798,14 @@ app.post(
           .json({ status: "error", message: "Poster must be an image file" });
       }
 
+      /* ========= 1️⃣ Upload main file ========= */
       const mediaUri = await pinFileToIpfs(
         file.buffer,
         file.originalname || "media",
         process.env.PINATA_JWT
       );
 
+      /* ========= 2️⃣ Poster logic (video) ========= */
       let posterUri = null;
 
       if (isVideo) {
@@ -842,10 +837,11 @@ app.post(
         }
       }
 
+      /* ========= 3️⃣ Build METADATA ========= */
       const safeName = String(name || "").trim();
       const safeDescription = String(description || "").trim();
       const safeCategory = String(category || "Other").trim();
-      const safeSubcategory = String(subcategory || "").trim() || null;
+      const safeSubcategory = safeTrim(subcategory);
       const safeProject = String(project || "Realife").trim();
 
       const safeBrandProject = String(
@@ -889,6 +885,14 @@ app.post(
         physicalItemIncluded: safePhysicalItemIncluded,
       });
 
+      const shouldIncludeDeliveryAttributes =
+        safeVertical === "store" ||
+        safeVertical === "cafe" ||
+        safeDeliveryMode === "delivery" ||
+        safeDeliveryEnabled ||
+        safePhysicalItemIncluded ||
+        safeOfficialItem;
+
       const attributes = [
         { trait_type: "Collection", value: safeCollection },
         { trait_type: "Project", value: safeProject },
@@ -920,18 +924,22 @@ app.post(
               ? "With delivery"
               : "Without delivery",
         },
-        {
-          trait_type: "Delivery Enabled",
-          value: safeDeliveryEnabled ? "Yes" : "No",
-        },
-        {
-          trait_type: "Physical Item Included",
-          value: safePhysicalItemIncluded ? "Yes" : "No",
-        },
-        {
-          trait_type: "Official Item",
-          value: safeOfficialItem ? "Yes" : "No",
-        },
+        ...(shouldIncludeDeliveryAttributes
+          ? [
+              {
+                trait_type: "Delivery Enabled",
+                value: safeDeliveryEnabled ? "Yes" : "No",
+              },
+              {
+                trait_type: "Physical Item Included",
+                value: safePhysicalItemIncluded ? "Yes" : "No",
+              },
+              {
+                trait_type: "Official Item",
+                value: safeOfficialItem ? "Yes" : "No",
+              },
+            ]
+          : []),
         {
           trait_type: "Suggested Market",
           value: suggestedMarketType === "protected" ? "Protected" : "Standard",
@@ -971,11 +979,12 @@ app.post(
 
       if (isVideo) {
         metadata.animation_url = mediaUri;
-        metadata.image = posterUri;
+        metadata.image = posterUri; // ✅ always image
       } else {
         metadata.image = mediaUri;
       }
 
+      /* ========= 4️⃣ Upload METADATA ========= */
       const metadataUpload = await axios.post(
         "https://api.pinata.cloud/pinning/pinJSONToIPFS",
         metadata,
@@ -994,6 +1003,7 @@ app.post(
 
       const metadataUri = `ipfs://${metadataCid}`;
 
+      /* ========= 5️⃣ RESPONSE ========= */
       return res.json({
         status: "ready",
         metadataUri,
@@ -1035,6 +1045,11 @@ app.post(
 
 /* =========================
    DYNAMIC NFT METADATA (ERC-1155)
+   NEW:
+   - GET /metadata1155/:contract/:tokenId
+   LEGACY:
+   - GET /metadata1155/:tokenId
+   - GET /metadata1155/:tokenId?contract=0x...
 ========================= */
 app.get("/metadata1155/:contract/:tokenId", async (req, res) => {
   const explicitContract = String(req.params.contract || "").trim();
@@ -1055,6 +1070,5 @@ app.listen(PORT, () => {
   console.log("[1155 contracts]", {
     standard: REALIFE_1155_STANDARD_CONTRACT || null,
     delivery: REALIFE_1155_DELIVERY_CONTRACT || null,
-    protectedMarketplace: REALIFE_PROTECTED_MARKETPLACE_CONTRACT || null,
   });
 });
