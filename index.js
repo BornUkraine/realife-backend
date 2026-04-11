@@ -45,6 +45,18 @@ function uniqueStrings(values) {
   return Array.from(new Set(values.map((v) => norm(v)).filter(Boolean)));
 }
 
+function cleanString(v, max = 2000) {
+  const s = String(v || "").trim();
+  return s ? s.slice(0, max) : "";
+}
+
+function addAttr(attributes, traitType, value) {
+  const trait = cleanString(traitType, 120);
+  const val = cleanString(value, 500);
+  if (!trait || !val) return;
+  attributes.push({ trait_type: trait, value: val });
+}
+
 function resolveContractAlias(raw) {
   const v = norm(raw);
   if (!v) return "";
@@ -59,6 +71,65 @@ function resolveContractAlias(raw) {
 
   if (isAddressLike(v)) return norm(v);
   return "";
+}
+
+const FULFILLMENT_TYPES = new Set([
+  "PHYSICAL_GOOD",
+  "DIGITAL_SERVICE",
+  "ONLINE_SESSION",
+  "LOCAL_SERVICE",
+]);
+
+function normalizeFulfillmentType(raw) {
+  const s = String(raw || "").trim().toUpperCase();
+  if (!s) return null;
+  if (FULFILLMENT_TYPES.has(s)) return s;
+  return null;
+}
+
+function computeProtectedFields({
+  fulfillmentType,
+  deliveryMode,
+  deliveryEnabled,
+  physicalItemIncluded,
+}) {
+  const explicitFulfillmentType = normalizeFulfillmentType(fulfillmentType);
+
+  const safeDeliveryMode =
+    String(deliveryMode || "").trim().toLowerCase() === "delivery"
+      ? "delivery"
+      : "none";
+
+  const hasPhysicalSignal =
+    explicitFulfillmentType === "PHYSICAL_GOOD" ||
+    safeDeliveryMode === "delivery" ||
+    toBool(deliveryEnabled) ||
+    toBool(physicalItemIncluded);
+
+  const finalFulfillmentType =
+    explicitFulfillmentType || (hasPhysicalSignal ? "PHYSICAL_GOOD" : null);
+
+  const finalDeliveryEnabled =
+    finalFulfillmentType === "PHYSICAL_GOOD"
+      ? true
+      : toBool(deliveryEnabled);
+
+  const finalPhysicalItemIncluded =
+    finalFulfillmentType === "PHYSICAL_GOOD"
+      ? true
+      : toBool(physicalItemIncluded);
+
+  const suggestedMarketType = finalFulfillmentType ? "PROTECTED" : "STANDARD";
+  const requiresProtectedMarket = suggestedMarketType === "PROTECTED";
+
+  return {
+    finalFulfillmentType,
+    finalDeliveryEnabled,
+    finalPhysicalItemIncluded,
+    suggestedMarketType,
+    requiresProtectedMarket,
+    safeDeliveryMode,
+  };
 }
 
 /* =========================
@@ -239,6 +310,13 @@ const REALIFE_1155_DELIVERY_CONTRACT = norm(
     ""
 );
 
+const REALIFE_PROTECTED_MARKETPLACE_CONTRACT = norm(
+  process.env.REALIFE_PROTECTED_MARKETPLACE_CONTRACT ||
+    process.env.NEXT_PUBLIC_REALIFE_PROTECTED_MARKETPLACE_CONTRACT ||
+    process.env.PROTECTED_MARKETPLACE_ADDRESS ||
+    ""
+);
+
 const KNOWN_1155_CONTRACTS = uniqueStrings([
   REALIFE_1155_STANDARD_CONTRACT,
   REALIFE_1155_DELIVERY_CONTRACT,
@@ -382,7 +460,9 @@ async function build1155MetadataResponse(contract1155, tokenId) {
   let image = null;
   let animation_url = null;
   let originalAttributes = [];
+
   let category = null;
+  let subcategory = null;
   let project = null;
   let collection = null;
   let item = null;
@@ -390,54 +470,76 @@ async function build1155MetadataResponse(contract1155, tokenId) {
   let rarity = null;
   let brandProject = null;
   let brand = null;
+  let vertical = null;
+  let proof = null;
+  let external_url = null;
+
   let deliveryMode = "none";
   let deliveryEnabled = false;
   let physicalItemIncluded = false;
   let officialItem = false;
-  let vertical = null;
-  let proof = null;
-  let external_url = null;
+  let fulfillmentType = null;
+  let suggestedMarketType = null;
+  let requiresProtectedMarket = false;
 
   if (tokenUri) {
     try {
       const metadataUrl = ipfsToHttp(tokenUri);
       const originalMetadata = await axios.get(metadataUrl, { timeout: 12_000 });
+      const data = originalMetadata.data || {};
 
-      name = originalMetadata.data?.name ?? name;
-      description = originalMetadata.data?.description ?? description;
+      name = data?.name ?? name;
+      description = data?.description ?? description;
 
-      image = originalMetadata.data?.image ?? image;
+      image = data?.image ?? image;
       animation_url =
-        originalMetadata.data?.animation_url ??
-        originalMetadata.data?.animationUrl ??
-        originalMetadata.data?.animation ??
+        data?.animation_url ??
+        data?.animationUrl ??
+        data?.animation ??
         null;
 
-      category = originalMetadata.data?.category ?? null;
-      project = originalMetadata.data?.project ?? null;
-      collection = originalMetadata.data?.collection ?? null;
-      item = originalMetadata.data?.item ?? null;
-      itemType = originalMetadata.data?.itemType ?? null;
-      rarity = originalMetadata.data?.rarity ?? null;
-      brandProject = originalMetadata.data?.brandProject ?? null;
-      brand = originalMetadata.data?.brand ?? null;
-      vertical = originalMetadata.data?.vertical ?? null;
-      proof = originalMetadata.data?.proof ?? null;
-      external_url = originalMetadata.data?.external_url ?? null;
+      category = data?.category ?? null;
+      subcategory = data?.subcategory ?? null;
+      project = data?.project ?? null;
+      collection = data?.collection ?? null;
+      item = data?.item ?? null;
+      itemType = data?.itemType ?? null;
+      rarity = data?.rarity ?? null;
+      brandProject = data?.brandProject ?? null;
+      brand = data?.brand ?? null;
+      vertical = data?.vertical ?? null;
+      proof = data?.proof ?? null;
+      external_url = data?.external_url ?? null;
 
-      deliveryMode =
-        String(originalMetadata.data?.deliveryMode || "")
-          .trim()
-          .toLowerCase() === "delivery"
-          ? "delivery"
-          : "none";
+      const protectedFields = computeProtectedFields({
+        fulfillmentType: data?.fulfillmentType,
+        deliveryMode: data?.deliveryMode,
+        deliveryEnabled: data?.deliveryEnabled,
+        physicalItemIncluded: data?.physicalItemIncluded,
+      });
 
-      deliveryEnabled = toBool(originalMetadata.data?.deliveryEnabled);
-      physicalItemIncluded = toBool(originalMetadata.data?.physicalItemIncluded);
-      officialItem = toBool(originalMetadata.data?.officialItem);
+      deliveryMode = protectedFields.safeDeliveryMode;
+      deliveryEnabled = protectedFields.finalDeliveryEnabled;
+      physicalItemIncluded = protectedFields.finalPhysicalItemIncluded;
+      fulfillmentType = protectedFields.finalFulfillmentType;
+      requiresProtectedMarket = protectedFields.requiresProtectedMarket;
 
-      originalAttributes = Array.isArray(originalMetadata.data?.attributes)
-        ? originalMetadata.data.attributes
+      officialItem = toBool(data?.officialItem);
+
+      const rawSuggestedMarketType = String(
+        data?.suggestedMarketType || ""
+      ).trim().toUpperCase();
+
+      suggestedMarketType =
+        rawSuggestedMarketType === "PROTECTED" ||
+        rawSuggestedMarketType === "STANDARD"
+          ? rawSuggestedMarketType
+          : protectedFields.suggestedMarketType;
+
+      requiresProtectedMarket = suggestedMarketType === "PROTECTED";
+
+      originalAttributes = Array.isArray(data?.attributes)
+        ? data.attributes
         : [];
 
       if (!animation_url && image) {
@@ -463,40 +565,57 @@ async function build1155MetadataResponse(contract1155, tokenId) {
   const animHttp = animation_url ? ipfsToHttp(animation_url) : null;
 
   const isUnique = max === 1n;
+  const attributes = [];
 
-  const attributes = [
-    { trait_type: "Standard", value: "ERC1155" },
-    { trait_type: "Token ID", value: tokenId.toString() },
-    { trait_type: "Total Supply", value: totalSupply.toString() },
-    ...(max > 0n ? [{ trait_type: "Max Supply", value: max.toString() }] : []),
-    ...(creator ? [{ trait_type: "Creator", value: creator }] : []),
-    ...(category ? [{ trait_type: "Category", value: category }] : []),
-    ...(project ? [{ trait_type: "Project", value: project }] : []),
-    ...(brandProject ? [{ trait_type: "Brand Project", value: brandProject }] : []),
-    ...(brand ? [{ trait_type: "Brand", value: brand }] : []),
-    ...(collection ? [{ trait_type: "Collection", value: collection }] : []),
-    ...(item ? [{ trait_type: "Item", value: item }] : []),
-    ...(itemType ? [{ trait_type: "Item Type", value: itemType }] : []),
-    ...(rarity ? [{ trait_type: "Rarity", value: rarity }] : []),
-    ...(vertical ? [{ trait_type: "Vertical", value: vertical }] : []),
-    {
-      trait_type: "Delivery Mode",
-      value: deliveryMode === "delivery" ? "With delivery" : "Without delivery",
-    },
-    { trait_type: "Delivery Enabled", value: deliveryEnabled ? "Yes" : "No" },
-    {
-      trait_type: "Physical Item Included",
-      value: physicalItemIncluded ? "Yes" : "No",
-    },
-    { trait_type: "Official Item", value: officialItem ? "Yes" : "No" },
-    ...(isUnique ? [{ trait_type: "Unique", value: "Yes" }] : []),
-    ...originalAttributes,
-    { trait_type: "Contract", value: contract1155 },
-    {
-      trait_type: "Last Updated",
-      value: new Date(Number(block.timestamp) * 1000).toISOString(),
-    },
-  ];
+  addAttr(attributes, "Standard", "ERC1155");
+  addAttr(attributes, "Token ID", tokenId.toString());
+  addAttr(attributes, "Total Supply", totalSupply.toString());
+
+  if (max > 0n) addAttr(attributes, "Max Supply", max.toString());
+  if (creator) addAttr(attributes, "Creator", creator);
+  if (category) addAttr(attributes, "Category", category);
+  if (subcategory) addAttr(attributes, "Subcategory", subcategory);
+  if (project) addAttr(attributes, "Project", project);
+  if (brandProject) addAttr(attributes, "Brand Project", brandProject);
+  if (brand) addAttr(attributes, "Brand", brand);
+  if (collection) addAttr(attributes, "Collection", collection);
+  if (item) addAttr(attributes, "Item", item);
+  if (itemType) addAttr(attributes, "Item Type", itemType);
+  if (rarity) addAttr(attributes, "Rarity", rarity);
+  if (vertical) addAttr(attributes, "Vertical", vertical);
+  if (fulfillmentType) addAttr(attributes, "Fulfillment Type", fulfillmentType);
+
+  addAttr(
+    attributes,
+    "Delivery Mode",
+    deliveryMode === "delivery" ? "With delivery" : "Without delivery"
+  );
+  addAttr(attributes, "Delivery Enabled", deliveryEnabled ? "Yes" : "No");
+  addAttr(
+    attributes,
+    "Physical Item Included",
+    physicalItemIncluded ? "Yes" : "No"
+  );
+  addAttr(attributes, "Official Item", officialItem ? "Yes" : "No");
+  addAttr(attributes, "Suggested Market", suggestedMarketType || "STANDARD");
+  addAttr(
+    attributes,
+    "Protected Market Required",
+    requiresProtectedMarket ? "Yes" : "No"
+  );
+
+  if (isUnique) addAttr(attributes, "Unique", "Yes");
+
+  if (Array.isArray(originalAttributes) && originalAttributes.length > 0) {
+    attributes.push(...originalAttributes);
+  }
+
+  addAttr(attributes, "Contract", contract1155);
+  addAttr(
+    attributes,
+    "Last Updated",
+    new Date(Number(block.timestamp) * 1000).toISOString()
+  );
 
   return {
     contract: contract1155,
@@ -509,6 +628,7 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     animation_url: animHttp,
 
     category,
+    subcategory,
     project,
     brandProject,
     brand,
@@ -525,6 +645,10 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     deliveryEnabled,
     physicalItemIncluded,
     officialItem,
+
+    fulfillmentType,
+    suggestedMarketType,
+    requiresProtectedMarket,
 
     attributes,
   };
@@ -580,7 +704,7 @@ app.use(express.json());
 ========================= */
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
+  limits: { fileSize: 100 * 1024 * 1024 },
 });
 
 /* =========================
@@ -595,6 +719,7 @@ app.get("/", (_req, res) => {
     contracts: {
       standard1155: REALIFE_1155_STANDARD_CONTRACT || null,
       delivery1155: REALIFE_1155_DELIVERY_CONTRACT || null,
+      protectedMarketplace: REALIFE_PROTECTED_MARKETPLACE_CONTRACT || null,
     },
   });
 });
@@ -627,6 +752,8 @@ async function pinFileToIpfs(buffer, filename, jwt) {
    MINT PREPARE (UPLOAD + METADATA)
    - Returns tokenURI (metadataUri)
    - Frontend calls 1155 contract createEdition(supply, tokenURI)
+   - Updated for PROTECTED system:
+     supports subcategory + fulfillmentType + suggestedMarketType
 ========================= */
 app.post(
   "/api/mint/prepare",
@@ -640,10 +767,12 @@ app.post(
         name,
         description,
         category,
+        subcategory,
         project,
         brandProject,
         brand,
         itemType,
+        fulfillmentType,
         deliveryMode,
         supply,
         proofUrl,
@@ -726,106 +855,135 @@ app.post(
       }
 
       /* ========= 3️⃣ Build METADATA ========= */
-      const safeName = String(name || "").trim();
-      const safeDescription = String(description || "").trim();
-      const safeCategory = String(category || "Other").trim();
-      const safeProject = String(project || "Realife").trim();
+      const safeName = cleanString(name, 300);
+      const safeDescription = cleanString(description, 5000);
+      const safeCategory = cleanString(category, 200) || "Other";
+      const safeSubcategory = cleanString(subcategory, 200) || null;
+      const safeProject = cleanString(project, 200) || "Realife";
 
-      const safeBrandProject = String(
-        brandProject || safeProject || "Realife"
-      ).trim();
-      const safeBrand = String(brand || "").trim() || null;
+      const safeBrandProject =
+        cleanString(brandProject, 200) ||
+        cleanString(safeProject, 200) ||
+        "Realife";
 
-      const safeCollection = String(collection || safeProject || "Realife").trim();
-      const safeDrink = String(drink || "").trim();
-      const safeItem = String(item || "").trim();
-      const safeItemType = String(itemType || "").trim() || safeItem || null;
+      const safeBrand = cleanString(brand, 200) || null;
+      const safeCollection =
+        cleanString(collection, 200) ||
+        cleanString(safeProject, 200) ||
+        "Realife";
 
-      const safeRarity = String(rarity || "").trim();
+      const safeDrink = cleanString(drink, 200) || null;
+      const safeItem = cleanString(item, 200) || null;
+      const safeItemType =
+        cleanString(itemType, 200) || safeItem || null;
+
+      const safeRarity = cleanString(rarity, 120) || null;
       const safeSupply = Number(supply) || 1;
-      const safeProofUrl = String(proofUrl || "").trim() || null;
-      const safeExternalUrl = String(externalUrl || proofUrl || "").trim() || null;
-      const safeVertical = String(vertical || "").trim() || null;
+      const safeProofUrl = cleanString(proofUrl, 1000) || null;
+      const safeExternalUrl =
+        cleanString(externalUrl, 1000) ||
+        cleanString(proofUrl, 1000) ||
+        null;
 
-      const safeDeliveryMode =
-        String(deliveryMode || "").trim().toLowerCase() === "delivery"
-          ? "delivery"
-          : "none";
-
-      const safeDeliveryEnabled =
-        toBool(deliveryEnabled) || safeDeliveryMode === "delivery";
-
-      const safePhysicalItemIncluded =
-        toBool(physicalItemIncluded) || safeDeliveryMode === "delivery";
-
+      const safeVertical = cleanString(vertical, 120) || null;
       const safeOfficialItem = toBool(officialItem);
+
+      const protectedFields = computeProtectedFields({
+        fulfillmentType,
+        deliveryMode,
+        deliveryEnabled,
+        physicalItemIncluded,
+      });
+
+      const finalFulfillmentType = protectedFields.finalFulfillmentType;
+      const finalDeliveryMode = protectedFields.safeDeliveryMode;
+      const finalDeliveryEnabled = protectedFields.finalDeliveryEnabled;
+      const finalPhysicalItemIncluded =
+        protectedFields.finalPhysicalItemIncluded;
+      const suggestedMarketType = protectedFields.suggestedMarketType;
+      const requiresProtectedMarket =
+        protectedFields.requiresProtectedMarket;
 
       const shouldIncludeDeliveryAttributes =
         safeVertical === "store" ||
         safeVertical === "cafe" ||
-        safeDeliveryMode === "delivery" ||
-        safeDeliveryEnabled ||
-        safePhysicalItemIncluded ||
-        safeOfficialItem;
+        finalDeliveryMode === "delivery" ||
+        finalDeliveryEnabled ||
+        finalPhysicalItemIncluded ||
+        safeOfficialItem ||
+        !!finalFulfillmentType;
 
-      const attributes = [
-        { trait_type: "Collection", value: safeCollection },
-        { trait_type: "Project", value: safeProject },
-        ...(safeBrandProject
-          ? [{ trait_type: "Brand Project", value: safeBrandProject }]
-          : []),
-        ...(safeBrand ? [{ trait_type: "Brand", value: safeBrand }] : []),
-        { trait_type: "Category", value: safeCategory },
-        ...(safeItem ? [{ trait_type: "Item", value: safeItem }] : []),
-        ...(safeItemType ? [{ trait_type: "Item Type", value: safeItemType }] : []),
-        ...(safeDrink ? [{ trait_type: "Drink", value: safeDrink }] : []),
-        ...(safeRarity ? [{ trait_type: "Rarity", value: safeRarity }] : []),
-        ...(safeVertical ? [{ trait_type: "Vertical", value: safeVertical }] : []),
-        {
-          trait_type: "Delivery Mode",
-          value:
-            safeDeliveryMode === "delivery"
-              ? "With delivery"
-              : "Without delivery",
-        },
-        ...(shouldIncludeDeliveryAttributes
-          ? [
-              {
-                trait_type: "Delivery Enabled",
-                value: safeDeliveryEnabled ? "Yes" : "No",
-              },
-              {
-                trait_type: "Physical Item Included",
-                value: safePhysicalItemIncluded ? "Yes" : "No",
-              },
-              {
-                trait_type: "Official Item",
-                value: safeOfficialItem ? "Yes" : "No",
-              },
-            ]
-          : []),
-        { trait_type: "Supply", value: String(safeSupply) },
-      ];
+      const attributes = [];
+      addAttr(attributes, "Collection", safeCollection);
+      addAttr(attributes, "Project", safeProject);
+      addAttr(attributes, "Brand Project", safeBrandProject);
+      addAttr(attributes, "Brand", safeBrand);
+      addAttr(attributes, "Category", safeCategory);
+      addAttr(attributes, "Subcategory", safeSubcategory);
+      addAttr(attributes, "Item", safeItem);
+      addAttr(attributes, "Item Type", safeItemType);
+      addAttr(attributes, "Drink", safeDrink);
+      addAttr(attributes, "Rarity", safeRarity);
+      addAttr(attributes, "Vertical", safeVertical);
+      addAttr(attributes, "Fulfillment Type", finalFulfillmentType);
+      addAttr(
+        attributes,
+        "Delivery Mode",
+        finalDeliveryMode === "delivery"
+          ? "With delivery"
+          : "Without delivery"
+      );
+
+      if (shouldIncludeDeliveryAttributes) {
+        addAttr(
+          attributes,
+          "Delivery Enabled",
+          finalDeliveryEnabled ? "Yes" : "No"
+        );
+        addAttr(
+          attributes,
+          "Physical Item Included",
+          finalPhysicalItemIncluded ? "Yes" : "No"
+        );
+        addAttr(
+          attributes,
+          "Official Item",
+          safeOfficialItem ? "Yes" : "No"
+        );
+      }
+
+      addAttr(attributes, "Suggested Market", suggestedMarketType);
+      addAttr(
+        attributes,
+        "Protected Market Required",
+        requiresProtectedMarket ? "Yes" : "No"
+      );
+      addAttr(attributes, "Supply", String(safeSupply));
 
       const metadata = {
         name: safeName,
         description: safeDescription,
 
         category: safeCategory,
+        subcategory: safeSubcategory,
         project: safeProject,
         brandProject: safeBrandProject,
         brand: safeBrand,
         collection: safeCollection,
-        item: safeItem || null,
-        itemType: safeItemType || null,
-        drink: safeDrink || null,
-        rarity: safeRarity || null,
+        item: safeItem,
+        itemType: safeItemType,
+        drink: safeDrink,
+        rarity: safeRarity,
         supply: safeSupply,
 
         vertical: safeVertical,
-        deliveryMode: safeDeliveryMode,
-        deliveryEnabled: safeDeliveryEnabled,
-        physicalItemIncluded: safePhysicalItemIncluded,
+        fulfillmentType: finalFulfillmentType,
+        suggestedMarketType,
+        requiresProtectedMarket,
+
+        deliveryMode: finalDeliveryMode,
+        deliveryEnabled: finalDeliveryEnabled,
+        physicalItemIncluded: finalPhysicalItemIncluded,
         officialItem: safeOfficialItem,
 
         proof: safeProofUrl,
@@ -835,7 +993,7 @@ app.post(
 
       if (isVideo) {
         metadata.animation_url = mediaUri;
-        metadata.image = posterUri; // ✅ always image
+        metadata.image = posterUri;
       } else {
         metadata.image = mediaUri;
       }
@@ -867,6 +1025,7 @@ app.post(
         preview: {
           name: metadata.name,
           category: metadata.category,
+          subcategory: metadata.subcategory,
           project: metadata.project,
           brandProject: metadata.brandProject,
           brand: metadata.brand,
@@ -876,10 +1035,16 @@ app.post(
           drink: metadata.drink,
           rarity: metadata.rarity,
           vertical: metadata.vertical,
+
+          fulfillmentType: metadata.fulfillmentType,
+          suggestedMarketType: metadata.suggestedMarketType,
+          requiresProtectedMarket: metadata.requiresProtectedMarket,
+
           deliveryMode: metadata.deliveryMode,
           deliveryEnabled: metadata.deliveryEnabled,
           physicalItemIncluded: metadata.physicalItemIncluded,
           officialItem: metadata.officialItem,
+
           kind: isVideo ? "video" : "image",
           media: isVideo ? metadata.animation_url : metadata.image,
           poster: isVideo ? metadata.image : null,
@@ -923,5 +1088,6 @@ app.listen(PORT, () => {
   console.log("[1155 contracts]", {
     standard: REALIFE_1155_STANDARD_CONTRACT || null,
     delivery: REALIFE_1155_DELIVERY_CONTRACT || null,
+    protectedMarketplace: REALIFE_PROTECTED_MARKETPLACE_CONTRACT || null,
   });
 });
