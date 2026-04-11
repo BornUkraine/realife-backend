@@ -45,21 +45,6 @@ function uniqueStrings(values) {
   return Array.from(new Set(values.map((v) => norm(v)).filter(Boolean)));
 }
 
-<<<<<<< HEAD
-function cleanString(v, max = 2000) {
-  const s = String(v || "").trim();
-  return s ? s.slice(0, max) : "";
-}
-
-function addAttr(attributes, traitType, value) {
-  const trait = cleanString(traitType, 120);
-  const val = cleanString(value, 500);
-  if (!trait || !val) return;
-  attributes.push({ trait_type: trait, value: val });
-}
-
-=======
->>>>>>> fd7381e (Restore clean index.js from origin/main)
 function resolveContractAlias(raw) {
   const v = norm(raw);
   if (!v) return "";
@@ -76,68 +61,75 @@ function resolveContractAlias(raw) {
   return "";
 }
 
-<<<<<<< HEAD
-const FULFILLMENT_TYPES = new Set([
-  "PHYSICAL_GOOD",
-  "DIGITAL_SERVICE",
-  "ONLINE_SESSION",
-  "LOCAL_SERVICE",
-]);
-
-function normalizeFulfillmentType(raw) {
-  const s = String(raw || "").trim().toUpperCase();
+function normalizeFulfillmentType(v) {
+  const s = String(v || "").trim().toLowerCase();
   if (!s) return null;
-  if (FULFILLMENT_TYPES.has(s)) return s;
+
+  if (
+    s === "physical_good" ||
+    s === "physical" ||
+    s === "good" ||
+    s === "product" ||
+    s === "delivery"
+  ) {
+    return "PHYSICAL_GOOD";
+  }
+
+  if (
+    s === "digital_service" ||
+    s === "digital" ||
+    s === "service" ||
+    s === "work"
+  ) {
+    return "DIGITAL_SERVICE";
+  }
+
+  if (
+    s === "online_session" ||
+    s === "online" ||
+    s === "session" ||
+    s === "call" ||
+    s === "consultation"
+  ) {
+    return "ONLINE_SESSION";
+  }
+
+  if (
+    s === "local_service" ||
+    s === "local" ||
+    s === "offline" ||
+    s === "in_person" ||
+    s === "inperson"
+  ) {
+    return "LOCAL_SERVICE";
+  }
+
   return null;
 }
 
-function computeProtectedFields({
+function humanFulfillmentType(v) {
+  if (v === "PHYSICAL_GOOD") return "Physical Good";
+  if (v === "DIGITAL_SERVICE") return "Digital Service";
+  if (v === "ONLINE_SESSION") return "Online Session";
+  if (v === "LOCAL_SERVICE") return "Local Service";
+  return null;
+}
+
+function inferSuggestedMarketType({
   fulfillmentType,
-  deliveryMode,
   deliveryEnabled,
   physicalItemIncluded,
 }) {
-  const explicitFulfillmentType = normalizeFulfillmentType(fulfillmentType);
-
-  const safeDeliveryMode =
-    String(deliveryMode || "").trim().toLowerCase() === "delivery"
-      ? "delivery"
-      : "none";
-
-  const hasPhysicalSignal =
-    explicitFulfillmentType === "PHYSICAL_GOOD" ||
-    safeDeliveryMode === "delivery" ||
-    toBool(deliveryEnabled) ||
-    toBool(physicalItemIncluded);
-
-  const finalFulfillmentType =
-    explicitFulfillmentType || (hasPhysicalSignal ? "PHYSICAL_GOOD" : null);
-
-  const finalDeliveryEnabled =
-    finalFulfillmentType === "PHYSICAL_GOOD"
-      ? true
-      : toBool(deliveryEnabled);
-
-  const finalPhysicalItemIncluded =
-    finalFulfillmentType === "PHYSICAL_GOOD"
-      ? true
-      : toBool(physicalItemIncluded);
-
-  const suggestedMarketType = finalFulfillmentType ? "PROTECTED" : "STANDARD";
-  const requiresProtectedMarket = suggestedMarketType === "PROTECTED";
-
-  return {
-    finalFulfillmentType,
-    finalDeliveryEnabled,
-    finalPhysicalItemIncluded,
-    suggestedMarketType,
-    requiresProtectedMarket,
-    safeDeliveryMode,
-  };
+  if (fulfillmentType) return "protected";
+  if (deliveryEnabled || physicalItemIncluded) return "protected";
+  return "standard";
 }
 
-=======
->>>>>>> fd7381e (Restore clean index.js from origin/main)
+function safeTrim(v) {
+  const s = String(v || "").trim();
+  return s || null;
+}
+
 /* =========================
    ABI (READ-ONLY) — 1155 ONLY
    Works for:
@@ -224,10 +216,6 @@ async function headContentType(url) {
 
 /* =========================
    AUTO-POSTER HELPERS (ffmpeg)
-   ✅ Install in backend:
-      npm i ffmpeg-static
-   ✅ Optional env fallback:
-      DEFAULT_VIDEO_POSTER = ipfs://<CID>   (must be IMAGE)
 ========================= */
 async function runFfmpeg(args) {
   if (!ffmpegPath) throw new Error("ffmpeg binary not found (ffmpeg-static)");
@@ -302,7 +290,7 @@ const client = createPublicClient({
 });
 
 /* =========================
-   KNOWN USER 1155 CONTRACTS
+   KNOWN CONTRACTS
 ========================= */
 const REALIFE_1155_STANDARD_CONTRACT = norm(
   process.env.REALIFE_1155_NEW_CONTRACT ||
@@ -316,16 +304,15 @@ const REALIFE_1155_DELIVERY_CONTRACT = norm(
     ""
 );
 
-<<<<<<< HEAD
 const REALIFE_PROTECTED_MARKETPLACE_CONTRACT = norm(
   process.env.REALIFE_PROTECTED_MARKETPLACE_CONTRACT ||
     process.env.NEXT_PUBLIC_REALIFE_PROTECTED_MARKETPLACE_CONTRACT ||
     process.env.PROTECTED_MARKETPLACE_ADDRESS ||
+    process.env.REALIFE_MARKETPLACE_PROTECTED_ADDRESS ||
+    process.env.MARKETPLACE_PROTECTED_ADDRESS ||
     ""
 );
 
-=======
->>>>>>> fd7381e (Restore clean index.js from origin/main)
 const KNOWN_1155_CONTRACTS = uniqueStrings([
   REALIFE_1155_STANDARD_CONTRACT,
   REALIFE_1155_DELIVERY_CONTRACT,
@@ -469,13 +456,9 @@ async function build1155MetadataResponse(contract1155, tokenId) {
   let image = null;
   let animation_url = null;
   let originalAttributes = [];
-<<<<<<< HEAD
 
   let category = null;
   let subcategory = null;
-=======
-  let category = null;
->>>>>>> fd7381e (Restore clean index.js from origin/main)
   let project = null;
   let collection = null;
   let item = null;
@@ -483,87 +466,20 @@ async function build1155MetadataResponse(contract1155, tokenId) {
   let rarity = null;
   let brandProject = null;
   let brand = null;
-<<<<<<< HEAD
-  let vertical = null;
-  let proof = null;
-  let external_url = null;
-
-=======
->>>>>>> fd7381e (Restore clean index.js from origin/main)
   let deliveryMode = "none";
   let deliveryEnabled = false;
   let physicalItemIncluded = false;
   let officialItem = false;
-<<<<<<< HEAD
-  let fulfillmentType = null;
-  let suggestedMarketType = null;
-  let requiresProtectedMarket = false;
-=======
   let vertical = null;
   let proof = null;
   let external_url = null;
->>>>>>> fd7381e (Restore clean index.js from origin/main)
+  let fulfillmentType = null;
+  let suggestedMarketType = null;
 
   if (tokenUri) {
     try {
       const metadataUrl = ipfsToHttp(tokenUri);
       const originalMetadata = await axios.get(metadataUrl, { timeout: 12_000 });
-<<<<<<< HEAD
-      const data = originalMetadata.data || {};
-
-      name = data?.name ?? name;
-      description = data?.description ?? description;
-
-      image = data?.image ?? image;
-      animation_url =
-        data?.animation_url ??
-        data?.animationUrl ??
-        data?.animation ??
-        null;
-
-      category = data?.category ?? null;
-      subcategory = data?.subcategory ?? null;
-      project = data?.project ?? null;
-      collection = data?.collection ?? null;
-      item = data?.item ?? null;
-      itemType = data?.itemType ?? null;
-      rarity = data?.rarity ?? null;
-      brandProject = data?.brandProject ?? null;
-      brand = data?.brand ?? null;
-      vertical = data?.vertical ?? null;
-      proof = data?.proof ?? null;
-      external_url = data?.external_url ?? null;
-
-      const protectedFields = computeProtectedFields({
-        fulfillmentType: data?.fulfillmentType,
-        deliveryMode: data?.deliveryMode,
-        deliveryEnabled: data?.deliveryEnabled,
-        physicalItemIncluded: data?.physicalItemIncluded,
-      });
-
-      deliveryMode = protectedFields.safeDeliveryMode;
-      deliveryEnabled = protectedFields.finalDeliveryEnabled;
-      physicalItemIncluded = protectedFields.finalPhysicalItemIncluded;
-      fulfillmentType = protectedFields.finalFulfillmentType;
-      requiresProtectedMarket = protectedFields.requiresProtectedMarket;
-
-      officialItem = toBool(data?.officialItem);
-
-      const rawSuggestedMarketType = String(
-        data?.suggestedMarketType || ""
-      ).trim().toUpperCase();
-
-      suggestedMarketType =
-        rawSuggestedMarketType === "PROTECTED" ||
-        rawSuggestedMarketType === "STANDARD"
-          ? rawSuggestedMarketType
-          : protectedFields.suggestedMarketType;
-
-      requiresProtectedMarket = suggestedMarketType === "PROTECTED";
-
-      originalAttributes = Array.isArray(data?.attributes)
-        ? data.attributes
-=======
 
       name = originalMetadata.data?.name ?? name;
       description = originalMetadata.data?.description ?? description;
@@ -576,6 +492,7 @@ async function build1155MetadataResponse(contract1155, tokenId) {
         null;
 
       category = originalMetadata.data?.category ?? null;
+      subcategory = originalMetadata.data?.subcategory ?? null;
       project = originalMetadata.data?.project ?? null;
       collection = originalMetadata.data?.collection ?? null;
       item = originalMetadata.data?.item ?? null;
@@ -598,9 +515,14 @@ async function build1155MetadataResponse(contract1155, tokenId) {
       physicalItemIncluded = toBool(originalMetadata.data?.physicalItemIncluded);
       officialItem = toBool(originalMetadata.data?.officialItem);
 
+      fulfillmentType = normalizeFulfillmentType(
+        originalMetadata.data?.fulfillmentType
+      );
+
+      suggestedMarketType = safeTrim(originalMetadata.data?.suggestedMarketType);
+
       originalAttributes = Array.isArray(originalMetadata.data?.attributes)
         ? originalMetadata.data.attributes
->>>>>>> fd7381e (Restore clean index.js from origin/main)
         : [];
 
       if (!animation_url && image) {
@@ -620,65 +542,26 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     }
   }
 
+  if (!fulfillmentType) {
+    if (deliveryEnabled || physicalItemIncluded || deliveryMode === "delivery") {
+      fulfillmentType = "PHYSICAL_GOOD";
+    }
+  }
+
+  if (!suggestedMarketType) {
+    suggestedMarketType = inferSuggestedMarketType({
+      fulfillmentType,
+      deliveryEnabled,
+      physicalItemIncluded,
+    });
+  }
+
   const block = await client.getBlock();
 
   const imageHttp = image ? ipfsToHttp(image) : null;
   const animHttp = animation_url ? ipfsToHttp(animation_url) : null;
 
   const isUnique = max === 1n;
-<<<<<<< HEAD
-  const attributes = [];
-
-  addAttr(attributes, "Standard", "ERC1155");
-  addAttr(attributes, "Token ID", tokenId.toString());
-  addAttr(attributes, "Total Supply", totalSupply.toString());
-
-  if (max > 0n) addAttr(attributes, "Max Supply", max.toString());
-  if (creator) addAttr(attributes, "Creator", creator);
-  if (category) addAttr(attributes, "Category", category);
-  if (subcategory) addAttr(attributes, "Subcategory", subcategory);
-  if (project) addAttr(attributes, "Project", project);
-  if (brandProject) addAttr(attributes, "Brand Project", brandProject);
-  if (brand) addAttr(attributes, "Brand", brand);
-  if (collection) addAttr(attributes, "Collection", collection);
-  if (item) addAttr(attributes, "Item", item);
-  if (itemType) addAttr(attributes, "Item Type", itemType);
-  if (rarity) addAttr(attributes, "Rarity", rarity);
-  if (vertical) addAttr(attributes, "Vertical", vertical);
-  if (fulfillmentType) addAttr(attributes, "Fulfillment Type", fulfillmentType);
-
-  addAttr(
-    attributes,
-    "Delivery Mode",
-    deliveryMode === "delivery" ? "With delivery" : "Without delivery"
-  );
-  addAttr(attributes, "Delivery Enabled", deliveryEnabled ? "Yes" : "No");
-  addAttr(
-    attributes,
-    "Physical Item Included",
-    physicalItemIncluded ? "Yes" : "No"
-  );
-  addAttr(attributes, "Official Item", officialItem ? "Yes" : "No");
-  addAttr(attributes, "Suggested Market", suggestedMarketType || "STANDARD");
-  addAttr(
-    attributes,
-    "Protected Market Required",
-    requiresProtectedMarket ? "Yes" : "No"
-  );
-
-  if (isUnique) addAttr(attributes, "Unique", "Yes");
-
-  if (Array.isArray(originalAttributes) && originalAttributes.length > 0) {
-    attributes.push(...originalAttributes);
-  }
-
-  addAttr(attributes, "Contract", contract1155);
-  addAttr(
-    attributes,
-    "Last Updated",
-    new Date(Number(block.timestamp) * 1000).toISOString()
-  );
-=======
 
   const attributes = [
     { trait_type: "Standard", value: "ERC1155" },
@@ -686,15 +569,26 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     { trait_type: "Total Supply", value: totalSupply.toString() },
     ...(max > 0n ? [{ trait_type: "Max Supply", value: max.toString() }] : []),
     ...(creator ? [{ trait_type: "Creator", value: creator }] : []),
-    ...(category ? [{ trait_type: "Category", value: category }] : []),
-    ...(project ? [{ trait_type: "Project", value: project }] : []),
-    ...(brandProject ? [{ trait_type: "Brand Project", value: brandProject }] : []),
-    ...(brand ? [{ trait_type: "Brand", value: brand }] : []),
     ...(collection ? [{ trait_type: "Collection", value: collection }] : []),
+    ...(project ? [{ trait_type: "Project", value: project }] : []),
+    ...(brandProject
+      ? [{ trait_type: "Brand Project", value: brandProject }]
+      : []),
+    ...(brand ? [{ trait_type: "Brand", value: brand }] : []),
+    ...(category ? [{ trait_type: "Category", value: category }] : []),
+    ...(subcategory ? [{ trait_type: "Subcategory", value: subcategory }] : []),
     ...(item ? [{ trait_type: "Item", value: item }] : []),
     ...(itemType ? [{ trait_type: "Item Type", value: itemType }] : []),
     ...(rarity ? [{ trait_type: "Rarity", value: rarity }] : []),
     ...(vertical ? [{ trait_type: "Vertical", value: vertical }] : []),
+    ...(humanFulfillmentType(fulfillmentType)
+      ? [
+          {
+            trait_type: "Fulfillment Type",
+            value: humanFulfillmentType(fulfillmentType),
+          },
+        ]
+      : []),
     {
       trait_type: "Delivery Mode",
       value: deliveryMode === "delivery" ? "With delivery" : "Without delivery",
@@ -705,6 +599,10 @@ async function build1155MetadataResponse(contract1155, tokenId) {
       value: physicalItemIncluded ? "Yes" : "No",
     },
     { trait_type: "Official Item", value: officialItem ? "Yes" : "No" },
+    {
+      trait_type: "Suggested Market",
+      value: suggestedMarketType === "protected" ? "Protected" : "Standard",
+    },
     ...(isUnique ? [{ trait_type: "Unique", value: "Yes" }] : []),
     ...originalAttributes,
     { trait_type: "Contract", value: contract1155 },
@@ -713,7 +611,6 @@ async function build1155MetadataResponse(contract1155, tokenId) {
       value: new Date(Number(block.timestamp) * 1000).toISOString(),
     },
   ];
->>>>>>> fd7381e (Restore clean index.js from origin/main)
 
   return {
     contract: contract1155,
@@ -726,10 +623,7 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     animation_url: animHttp,
 
     category,
-<<<<<<< HEAD
     subcategory,
-=======
->>>>>>> fd7381e (Restore clean index.js from origin/main)
     project,
     brandProject,
     brand,
@@ -747,13 +641,9 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     physicalItemIncluded,
     officialItem,
 
-<<<<<<< HEAD
     fulfillmentType,
     suggestedMarketType,
-    requiresProtectedMarket,
 
-=======
->>>>>>> fd7381e (Restore clean index.js from origin/main)
     attributes,
   };
 }
@@ -823,10 +713,7 @@ app.get("/", (_req, res) => {
     contracts: {
       standard1155: REALIFE_1155_STANDARD_CONTRACT || null,
       delivery1155: REALIFE_1155_DELIVERY_CONTRACT || null,
-<<<<<<< HEAD
       protectedMarketplace: REALIFE_PROTECTED_MARKETPLACE_CONTRACT || null,
-=======
->>>>>>> fd7381e (Restore clean index.js from origin/main)
     },
   });
 });
@@ -857,13 +744,6 @@ async function pinFileToIpfs(buffer, filename, jwt) {
 
 /* =========================
    MINT PREPARE (UPLOAD + METADATA)
-   - Returns tokenURI (metadataUri)
-   - Frontend calls 1155 contract createEdition(supply, tokenURI)
-<<<<<<< HEAD
-   - Updated for PROTECTED system:
-     supports subcategory + fulfillmentType + suggestedMarketType
-=======
->>>>>>> fd7381e (Restore clean index.js from origin/main)
 ========================= */
 app.post(
   "/api/mint/prepare",
@@ -877,6 +757,7 @@ app.post(
         name,
         description,
         category,
+        subcategory,
         project,
         brandProject,
         brand,
@@ -924,14 +805,12 @@ app.post(
           .json({ status: "error", message: "Poster must be an image file" });
       }
 
-      /* ========= 1️⃣ Upload main file ========= */
       const mediaUri = await pinFileToIpfs(
         file.buffer,
         file.originalname || "media",
         process.env.PINATA_JWT
       );
 
-      /* ========= 2️⃣ Poster logic (video) ========= */
       let posterUri = null;
 
       if (isVideo) {
@@ -963,116 +842,10 @@ app.post(
         }
       }
 
-      /* ========= 3️⃣ Build METADATA ========= */
-<<<<<<< HEAD
-      const safeName = cleanString(name, 300);
-      const safeDescription = cleanString(description, 5000);
-      const safeCategory = cleanString(category, 200) || "Other";
-      const safeSubcategory = cleanString(subcategory, 200) || null;
-      const safeProject = cleanString(project, 200) || "Realife";
-
-      const safeBrandProject =
-        cleanString(brandProject, 200) ||
-        cleanString(safeProject, 200) ||
-        "Realife";
-
-      const safeBrand = cleanString(brand, 200) || null;
-      const safeCollection =
-        cleanString(collection, 200) ||
-        cleanString(safeProject, 200) ||
-        "Realife";
-
-      const safeDrink = cleanString(drink, 200) || null;
-      const safeItem = cleanString(item, 200) || null;
-      const safeItemType =
-        cleanString(itemType, 200) || safeItem || null;
-
-      const safeRarity = cleanString(rarity, 120) || null;
-      const safeSupply = Number(supply) || 1;
-      const safeProofUrl = cleanString(proofUrl, 1000) || null;
-      const safeExternalUrl =
-        cleanString(externalUrl, 1000) ||
-        cleanString(proofUrl, 1000) ||
-        null;
-
-      const safeVertical = cleanString(vertical, 120) || null;
-      const safeOfficialItem = toBool(officialItem);
-
-      const protectedFields = computeProtectedFields({
-        fulfillmentType,
-        deliveryMode,
-        deliveryEnabled,
-        physicalItemIncluded,
-      });
-
-      const finalFulfillmentType = protectedFields.finalFulfillmentType;
-      const finalDeliveryMode = protectedFields.safeDeliveryMode;
-      const finalDeliveryEnabled = protectedFields.finalDeliveryEnabled;
-      const finalPhysicalItemIncluded =
-        protectedFields.finalPhysicalItemIncluded;
-      const suggestedMarketType = protectedFields.suggestedMarketType;
-      const requiresProtectedMarket =
-        protectedFields.requiresProtectedMarket;
-
-      const shouldIncludeDeliveryAttributes =
-        safeVertical === "store" ||
-        safeVertical === "cafe" ||
-        finalDeliveryMode === "delivery" ||
-        finalDeliveryEnabled ||
-        finalPhysicalItemIncluded ||
-        safeOfficialItem ||
-        !!finalFulfillmentType;
-
-      const attributes = [];
-      addAttr(attributes, "Collection", safeCollection);
-      addAttr(attributes, "Project", safeProject);
-      addAttr(attributes, "Brand Project", safeBrandProject);
-      addAttr(attributes, "Brand", safeBrand);
-      addAttr(attributes, "Category", safeCategory);
-      addAttr(attributes, "Subcategory", safeSubcategory);
-      addAttr(attributes, "Item", safeItem);
-      addAttr(attributes, "Item Type", safeItemType);
-      addAttr(attributes, "Drink", safeDrink);
-      addAttr(attributes, "Rarity", safeRarity);
-      addAttr(attributes, "Vertical", safeVertical);
-      addAttr(attributes, "Fulfillment Type", finalFulfillmentType);
-      addAttr(
-        attributes,
-        "Delivery Mode",
-        finalDeliveryMode === "delivery"
-          ? "With delivery"
-          : "Without delivery"
-      );
-
-      if (shouldIncludeDeliveryAttributes) {
-        addAttr(
-          attributes,
-          "Delivery Enabled",
-          finalDeliveryEnabled ? "Yes" : "No"
-        );
-        addAttr(
-          attributes,
-          "Physical Item Included",
-          finalPhysicalItemIncluded ? "Yes" : "No"
-        );
-        addAttr(
-          attributes,
-          "Official Item",
-          safeOfficialItem ? "Yes" : "No"
-        );
-      }
-
-      addAttr(attributes, "Suggested Market", suggestedMarketType);
-      addAttr(
-        attributes,
-        "Protected Market Required",
-        requiresProtectedMarket ? "Yes" : "No"
-      );
-      addAttr(attributes, "Supply", String(safeSupply));
-=======
       const safeName = String(name || "").trim();
       const safeDescription = String(description || "").trim();
       const safeCategory = String(category || "Other").trim();
+      const safeSubcategory = String(subcategory || "").trim() || null;
       const safeProject = String(project || "Realife").trim();
 
       const safeBrandProject = String(
@@ -1104,13 +877,17 @@ app.post(
 
       const safeOfficialItem = toBool(officialItem);
 
-      const shouldIncludeDeliveryAttributes =
-        safeVertical === "store" ||
-        safeVertical === "cafe" ||
-        safeDeliveryMode === "delivery" ||
-        safeDeliveryEnabled ||
-        safePhysicalItemIncluded ||
-        safeOfficialItem;
+      const finalFulfillmentType =
+        normalizeFulfillmentType(fulfillmentType) ||
+        (safeDeliveryEnabled || safePhysicalItemIncluded || safeDeliveryMode === "delivery"
+          ? "PHYSICAL_GOOD"
+          : null);
+
+      const suggestedMarketType = inferSuggestedMarketType({
+        fulfillmentType: finalFulfillmentType,
+        deliveryEnabled: safeDeliveryEnabled,
+        physicalItemIncluded: safePhysicalItemIncluded,
+      });
 
       const attributes = [
         { trait_type: "Collection", value: safeCollection },
@@ -1120,11 +897,22 @@ app.post(
           : []),
         ...(safeBrand ? [{ trait_type: "Brand", value: safeBrand }] : []),
         { trait_type: "Category", value: safeCategory },
+        ...(safeSubcategory
+          ? [{ trait_type: "Subcategory", value: safeSubcategory }]
+          : []),
         ...(safeItem ? [{ trait_type: "Item", value: safeItem }] : []),
         ...(safeItemType ? [{ trait_type: "Item Type", value: safeItemType }] : []),
         ...(safeDrink ? [{ trait_type: "Drink", value: safeDrink }] : []),
         ...(safeRarity ? [{ trait_type: "Rarity", value: safeRarity }] : []),
         ...(safeVertical ? [{ trait_type: "Vertical", value: safeVertical }] : []),
+        ...(humanFulfillmentType(finalFulfillmentType)
+          ? [
+              {
+                trait_type: "Fulfillment Type",
+                value: humanFulfillmentType(finalFulfillmentType),
+              },
+            ]
+          : []),
         {
           trait_type: "Delivery Mode",
           value:
@@ -1132,56 +920,49 @@ app.post(
               ? "With delivery"
               : "Without delivery",
         },
-        ...(shouldIncludeDeliveryAttributes
-          ? [
-              {
-                trait_type: "Delivery Enabled",
-                value: safeDeliveryEnabled ? "Yes" : "No",
-              },
-              {
-                trait_type: "Physical Item Included",
-                value: safePhysicalItemIncluded ? "Yes" : "No",
-              },
-              {
-                trait_type: "Official Item",
-                value: safeOfficialItem ? "Yes" : "No",
-              },
-            ]
-          : []),
+        {
+          trait_type: "Delivery Enabled",
+          value: safeDeliveryEnabled ? "Yes" : "No",
+        },
+        {
+          trait_type: "Physical Item Included",
+          value: safePhysicalItemIncluded ? "Yes" : "No",
+        },
+        {
+          trait_type: "Official Item",
+          value: safeOfficialItem ? "Yes" : "No",
+        },
+        {
+          trait_type: "Suggested Market",
+          value: suggestedMarketType === "protected" ? "Protected" : "Standard",
+        },
         { trait_type: "Supply", value: String(safeSupply) },
       ];
->>>>>>> fd7381e (Restore clean index.js from origin/main)
 
       const metadata = {
         name: safeName,
         description: safeDescription,
 
         category: safeCategory,
+        subcategory: safeSubcategory,
         project: safeProject,
         brandProject: safeBrandProject,
         brand: safeBrand,
         collection: safeCollection,
-        item: safeItem,
-        itemType: safeItemType,
-        drink: safeDrink,
-        rarity: safeRarity,
+        item: safeItem || null,
+        itemType: safeItemType || null,
+        drink: safeDrink || null,
+        rarity: safeRarity || null,
         supply: safeSupply,
 
         vertical: safeVertical,
-<<<<<<< HEAD
-        fulfillmentType: finalFulfillmentType,
-        suggestedMarketType,
-        requiresProtectedMarket,
-
-        deliveryMode: finalDeliveryMode,
-        deliveryEnabled: finalDeliveryEnabled,
-        physicalItemIncluded: finalPhysicalItemIncluded,
-=======
         deliveryMode: safeDeliveryMode,
         deliveryEnabled: safeDeliveryEnabled,
         physicalItemIncluded: safePhysicalItemIncluded,
->>>>>>> fd7381e (Restore clean index.js from origin/main)
         officialItem: safeOfficialItem,
+
+        fulfillmentType: finalFulfillmentType,
+        suggestedMarketType,
 
         proof: safeProofUrl,
         external_url: safeExternalUrl,
@@ -1195,7 +976,6 @@ app.post(
         metadata.image = mediaUri;
       }
 
-      /* ========= 4️⃣ Upload METADATA ========= */
       const metadataUpload = await axios.post(
         "https://api.pinata.cloud/pinning/pinJSONToIPFS",
         metadata,
@@ -1214,7 +994,6 @@ app.post(
 
       const metadataUri = `ipfs://${metadataCid}`;
 
-      /* ========= 5️⃣ RESPONSE ========= */
       return res.json({
         status: "ready",
         metadataUri,
@@ -1222,6 +1001,7 @@ app.post(
         preview: {
           name: metadata.name,
           category: metadata.category,
+          subcategory: metadata.subcategory,
           project: metadata.project,
           brandProject: metadata.brandProject,
           brand: metadata.brand,
@@ -1231,19 +1011,12 @@ app.post(
           drink: metadata.drink,
           rarity: metadata.rarity,
           vertical: metadata.vertical,
-<<<<<<< HEAD
-
-          fulfillmentType: metadata.fulfillmentType,
-          suggestedMarketType: metadata.suggestedMarketType,
-          requiresProtectedMarket: metadata.requiresProtectedMarket,
-
-=======
->>>>>>> fd7381e (Restore clean index.js from origin/main)
           deliveryMode: metadata.deliveryMode,
           deliveryEnabled: metadata.deliveryEnabled,
           physicalItemIncluded: metadata.physicalItemIncluded,
           officialItem: metadata.officialItem,
-
+          fulfillmentType: metadata.fulfillmentType,
+          suggestedMarketType: metadata.suggestedMarketType,
           kind: isVideo ? "video" : "image",
           media: isVideo ? metadata.animation_url : metadata.image,
           poster: isVideo ? metadata.image : null,
@@ -1262,11 +1035,6 @@ app.post(
 
 /* =========================
    DYNAMIC NFT METADATA (ERC-1155)
-   NEW:
-   - GET /metadata1155/:contract/:tokenId
-   LEGACY:
-   - GET /metadata1155/:tokenId
-   - GET /metadata1155/:tokenId?contract=0x...
 ========================= */
 app.get("/metadata1155/:contract/:tokenId", async (req, res) => {
   const explicitContract = String(req.params.contract || "").trim();
@@ -1287,9 +1055,6 @@ app.listen(PORT, () => {
   console.log("[1155 contracts]", {
     standard: REALIFE_1155_STANDARD_CONTRACT || null,
     delivery: REALIFE_1155_DELIVERY_CONTRACT || null,
-<<<<<<< HEAD
     protectedMarketplace: REALIFE_PROTECTED_MARKETPLACE_CONTRACT || null,
-=======
->>>>>>> fd7381e (Restore clean index.js from origin/main)
   });
 });
