@@ -45,6 +45,7 @@ function uniqueStrings(values) {
   return Array.from(new Set(values.map((v) => norm(v)).filter(Boolean)));
 }
 
+<<<<<<< HEAD
 function cleanString(v, max = 2000) {
   const s = String(v || "").trim();
   return s ? s.slice(0, max) : "";
@@ -57,6 +58,8 @@ function addAttr(attributes, traitType, value) {
   attributes.push({ trait_type: trait, value: val });
 }
 
+=======
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
 function resolveContractAlias(raw) {
   const v = norm(raw);
   if (!v) return "";
@@ -73,6 +76,7 @@ function resolveContractAlias(raw) {
   return "";
 }
 
+<<<<<<< HEAD
 const FULFILLMENT_TYPES = new Set([
   "PHYSICAL_GOOD",
   "DIGITAL_SERVICE",
@@ -132,6 +136,8 @@ function computeProtectedFields({
   };
 }
 
+=======
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
 /* =========================
    ABI (READ-ONLY) — 1155 ONLY
    Works for:
@@ -310,6 +316,7 @@ const REALIFE_1155_DELIVERY_CONTRACT = norm(
     ""
 );
 
+<<<<<<< HEAD
 const REALIFE_PROTECTED_MARKETPLACE_CONTRACT = norm(
   process.env.REALIFE_PROTECTED_MARKETPLACE_CONTRACT ||
     process.env.NEXT_PUBLIC_REALIFE_PROTECTED_MARKETPLACE_CONTRACT ||
@@ -317,6 +324,8 @@ const REALIFE_PROTECTED_MARKETPLACE_CONTRACT = norm(
     ""
 );
 
+=======
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
 const KNOWN_1155_CONTRACTS = uniqueStrings([
   REALIFE_1155_STANDARD_CONTRACT,
   REALIFE_1155_DELIVERY_CONTRACT,
@@ -460,9 +469,13 @@ async function build1155MetadataResponse(contract1155, tokenId) {
   let image = null;
   let animation_url = null;
   let originalAttributes = [];
+<<<<<<< HEAD
 
   let category = null;
   let subcategory = null;
+=======
+  let category = null;
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
   let project = null;
   let collection = null;
   let item = null;
@@ -470,22 +483,32 @@ async function build1155MetadataResponse(contract1155, tokenId) {
   let rarity = null;
   let brandProject = null;
   let brand = null;
+<<<<<<< HEAD
   let vertical = null;
   let proof = null;
   let external_url = null;
 
+=======
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
   let deliveryMode = "none";
   let deliveryEnabled = false;
   let physicalItemIncluded = false;
   let officialItem = false;
+<<<<<<< HEAD
   let fulfillmentType = null;
   let suggestedMarketType = null;
   let requiresProtectedMarket = false;
+=======
+  let vertical = null;
+  let proof = null;
+  let external_url = null;
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
 
   if (tokenUri) {
     try {
       const metadataUrl = ipfsToHttp(tokenUri);
       const originalMetadata = await axios.get(metadataUrl, { timeout: 12_000 });
+<<<<<<< HEAD
       const data = originalMetadata.data || {};
 
       name = data?.name ?? name;
@@ -540,6 +563,44 @@ async function build1155MetadataResponse(contract1155, tokenId) {
 
       originalAttributes = Array.isArray(data?.attributes)
         ? data.attributes
+=======
+
+      name = originalMetadata.data?.name ?? name;
+      description = originalMetadata.data?.description ?? description;
+
+      image = originalMetadata.data?.image ?? image;
+      animation_url =
+        originalMetadata.data?.animation_url ??
+        originalMetadata.data?.animationUrl ??
+        originalMetadata.data?.animation ??
+        null;
+
+      category = originalMetadata.data?.category ?? null;
+      project = originalMetadata.data?.project ?? null;
+      collection = originalMetadata.data?.collection ?? null;
+      item = originalMetadata.data?.item ?? null;
+      itemType = originalMetadata.data?.itemType ?? null;
+      rarity = originalMetadata.data?.rarity ?? null;
+      brandProject = originalMetadata.data?.brandProject ?? null;
+      brand = originalMetadata.data?.brand ?? null;
+      vertical = originalMetadata.data?.vertical ?? null;
+      proof = originalMetadata.data?.proof ?? null;
+      external_url = originalMetadata.data?.external_url ?? null;
+
+      deliveryMode =
+        String(originalMetadata.data?.deliveryMode || "")
+          .trim()
+          .toLowerCase() === "delivery"
+          ? "delivery"
+          : "none";
+
+      deliveryEnabled = toBool(originalMetadata.data?.deliveryEnabled);
+      physicalItemIncluded = toBool(originalMetadata.data?.physicalItemIncluded);
+      officialItem = toBool(originalMetadata.data?.officialItem);
+
+      originalAttributes = Array.isArray(originalMetadata.data?.attributes)
+        ? originalMetadata.data.attributes
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
         : [];
 
       if (!animation_url && image) {
@@ -565,6 +626,7 @@ async function build1155MetadataResponse(contract1155, tokenId) {
   const animHttp = animation_url ? ipfsToHttp(animation_url) : null;
 
   const isUnique = max === 1n;
+<<<<<<< HEAD
   const attributes = [];
 
   addAttr(attributes, "Standard", "ERC1155");
@@ -616,6 +678,42 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     "Last Updated",
     new Date(Number(block.timestamp) * 1000).toISOString()
   );
+=======
+
+  const attributes = [
+    { trait_type: "Standard", value: "ERC1155" },
+    { trait_type: "Token ID", value: tokenId.toString() },
+    { trait_type: "Total Supply", value: totalSupply.toString() },
+    ...(max > 0n ? [{ trait_type: "Max Supply", value: max.toString() }] : []),
+    ...(creator ? [{ trait_type: "Creator", value: creator }] : []),
+    ...(category ? [{ trait_type: "Category", value: category }] : []),
+    ...(project ? [{ trait_type: "Project", value: project }] : []),
+    ...(brandProject ? [{ trait_type: "Brand Project", value: brandProject }] : []),
+    ...(brand ? [{ trait_type: "Brand", value: brand }] : []),
+    ...(collection ? [{ trait_type: "Collection", value: collection }] : []),
+    ...(item ? [{ trait_type: "Item", value: item }] : []),
+    ...(itemType ? [{ trait_type: "Item Type", value: itemType }] : []),
+    ...(rarity ? [{ trait_type: "Rarity", value: rarity }] : []),
+    ...(vertical ? [{ trait_type: "Vertical", value: vertical }] : []),
+    {
+      trait_type: "Delivery Mode",
+      value: deliveryMode === "delivery" ? "With delivery" : "Without delivery",
+    },
+    { trait_type: "Delivery Enabled", value: deliveryEnabled ? "Yes" : "No" },
+    {
+      trait_type: "Physical Item Included",
+      value: physicalItemIncluded ? "Yes" : "No",
+    },
+    { trait_type: "Official Item", value: officialItem ? "Yes" : "No" },
+    ...(isUnique ? [{ trait_type: "Unique", value: "Yes" }] : []),
+    ...originalAttributes,
+    { trait_type: "Contract", value: contract1155 },
+    {
+      trait_type: "Last Updated",
+      value: new Date(Number(block.timestamp) * 1000).toISOString(),
+    },
+  ];
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
 
   return {
     contract: contract1155,
@@ -628,7 +726,10 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     animation_url: animHttp,
 
     category,
+<<<<<<< HEAD
     subcategory,
+=======
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
     project,
     brandProject,
     brand,
@@ -646,10 +747,13 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     physicalItemIncluded,
     officialItem,
 
+<<<<<<< HEAD
     fulfillmentType,
     suggestedMarketType,
     requiresProtectedMarket,
 
+=======
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
     attributes,
   };
 }
@@ -719,7 +823,10 @@ app.get("/", (_req, res) => {
     contracts: {
       standard1155: REALIFE_1155_STANDARD_CONTRACT || null,
       delivery1155: REALIFE_1155_DELIVERY_CONTRACT || null,
+<<<<<<< HEAD
       protectedMarketplace: REALIFE_PROTECTED_MARKETPLACE_CONTRACT || null,
+=======
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
     },
   });
 });
@@ -752,8 +859,11 @@ async function pinFileToIpfs(buffer, filename, jwt) {
    MINT PREPARE (UPLOAD + METADATA)
    - Returns tokenURI (metadataUri)
    - Frontend calls 1155 contract createEdition(supply, tokenURI)
+<<<<<<< HEAD
    - Updated for PROTECTED system:
      supports subcategory + fulfillmentType + suggestedMarketType
+=======
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
 ========================= */
 app.post(
   "/api/mint/prepare",
@@ -767,7 +877,6 @@ app.post(
         name,
         description,
         category,
-        subcategory,
         project,
         brandProject,
         brand,
@@ -855,6 +964,7 @@ app.post(
       }
 
       /* ========= 3️⃣ Build METADATA ========= */
+<<<<<<< HEAD
       const safeName = cleanString(name, 300);
       const safeDescription = cleanString(description, 5000);
       const safeCategory = cleanString(category, 200) || "Other";
@@ -959,13 +1069,94 @@ app.post(
         requiresProtectedMarket ? "Yes" : "No"
       );
       addAttr(attributes, "Supply", String(safeSupply));
+=======
+      const safeName = String(name || "").trim();
+      const safeDescription = String(description || "").trim();
+      const safeCategory = String(category || "Other").trim();
+      const safeProject = String(project || "Realife").trim();
+
+      const safeBrandProject = String(
+        brandProject || safeProject || "Realife"
+      ).trim();
+      const safeBrand = String(brand || "").trim() || null;
+
+      const safeCollection = String(collection || safeProject || "Realife").trim();
+      const safeDrink = String(drink || "").trim();
+      const safeItem = String(item || "").trim();
+      const safeItemType = String(itemType || "").trim() || safeItem || null;
+
+      const safeRarity = String(rarity || "").trim();
+      const safeSupply = Number(supply) || 1;
+      const safeProofUrl = String(proofUrl || "").trim() || null;
+      const safeExternalUrl = String(externalUrl || proofUrl || "").trim() || null;
+      const safeVertical = String(vertical || "").trim() || null;
+
+      const safeDeliveryMode =
+        String(deliveryMode || "").trim().toLowerCase() === "delivery"
+          ? "delivery"
+          : "none";
+
+      const safeDeliveryEnabled =
+        toBool(deliveryEnabled) || safeDeliveryMode === "delivery";
+
+      const safePhysicalItemIncluded =
+        toBool(physicalItemIncluded) || safeDeliveryMode === "delivery";
+
+      const safeOfficialItem = toBool(officialItem);
+
+      const shouldIncludeDeliveryAttributes =
+        safeVertical === "store" ||
+        safeVertical === "cafe" ||
+        safeDeliveryMode === "delivery" ||
+        safeDeliveryEnabled ||
+        safePhysicalItemIncluded ||
+        safeOfficialItem;
+
+      const attributes = [
+        { trait_type: "Collection", value: safeCollection },
+        { trait_type: "Project", value: safeProject },
+        ...(safeBrandProject
+          ? [{ trait_type: "Brand Project", value: safeBrandProject }]
+          : []),
+        ...(safeBrand ? [{ trait_type: "Brand", value: safeBrand }] : []),
+        { trait_type: "Category", value: safeCategory },
+        ...(safeItem ? [{ trait_type: "Item", value: safeItem }] : []),
+        ...(safeItemType ? [{ trait_type: "Item Type", value: safeItemType }] : []),
+        ...(safeDrink ? [{ trait_type: "Drink", value: safeDrink }] : []),
+        ...(safeRarity ? [{ trait_type: "Rarity", value: safeRarity }] : []),
+        ...(safeVertical ? [{ trait_type: "Vertical", value: safeVertical }] : []),
+        {
+          trait_type: "Delivery Mode",
+          value:
+            safeDeliveryMode === "delivery"
+              ? "With delivery"
+              : "Without delivery",
+        },
+        ...(shouldIncludeDeliveryAttributes
+          ? [
+              {
+                trait_type: "Delivery Enabled",
+                value: safeDeliveryEnabled ? "Yes" : "No",
+              },
+              {
+                trait_type: "Physical Item Included",
+                value: safePhysicalItemIncluded ? "Yes" : "No",
+              },
+              {
+                trait_type: "Official Item",
+                value: safeOfficialItem ? "Yes" : "No",
+              },
+            ]
+          : []),
+        { trait_type: "Supply", value: String(safeSupply) },
+      ];
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
 
       const metadata = {
         name: safeName,
         description: safeDescription,
 
         category: safeCategory,
-        subcategory: safeSubcategory,
         project: safeProject,
         brandProject: safeBrandProject,
         brand: safeBrand,
@@ -977,6 +1168,7 @@ app.post(
         supply: safeSupply,
 
         vertical: safeVertical,
+<<<<<<< HEAD
         fulfillmentType: finalFulfillmentType,
         suggestedMarketType,
         requiresProtectedMarket,
@@ -984,6 +1176,11 @@ app.post(
         deliveryMode: finalDeliveryMode,
         deliveryEnabled: finalDeliveryEnabled,
         physicalItemIncluded: finalPhysicalItemIncluded,
+=======
+        deliveryMode: safeDeliveryMode,
+        deliveryEnabled: safeDeliveryEnabled,
+        physicalItemIncluded: safePhysicalItemIncluded,
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
         officialItem: safeOfficialItem,
 
         proof: safeProofUrl,
@@ -1025,7 +1222,6 @@ app.post(
         preview: {
           name: metadata.name,
           category: metadata.category,
-          subcategory: metadata.subcategory,
           project: metadata.project,
           brandProject: metadata.brandProject,
           brand: metadata.brand,
@@ -1035,11 +1231,14 @@ app.post(
           drink: metadata.drink,
           rarity: metadata.rarity,
           vertical: metadata.vertical,
+<<<<<<< HEAD
 
           fulfillmentType: metadata.fulfillmentType,
           suggestedMarketType: metadata.suggestedMarketType,
           requiresProtectedMarket: metadata.requiresProtectedMarket,
 
+=======
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
           deliveryMode: metadata.deliveryMode,
           deliveryEnabled: metadata.deliveryEnabled,
           physicalItemIncluded: metadata.physicalItemIncluded,
@@ -1088,6 +1287,9 @@ app.listen(PORT, () => {
   console.log("[1155 contracts]", {
     standard: REALIFE_1155_STANDARD_CONTRACT || null,
     delivery: REALIFE_1155_DELIVERY_CONTRACT || null,
+<<<<<<< HEAD
     protectedMarketplace: REALIFE_PROTECTED_MARKETPLACE_CONTRACT || null,
+=======
+>>>>>>> fd7381e (Restore clean index.js from origin/main)
   });
 });
