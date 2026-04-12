@@ -158,20 +158,25 @@ const AI_ALLOWED_CATEGORIES = [
   "Marketing",
   "AI & Automation",
   "Development & Tech",
+  "Business & Professional Services",
   "Education & Coaching",
   "Health & Wellness",
-  "Legal & Consulting",
+  "Beauty & Personal Care",
   "Home & Repair",
-  "Events & Local Service",
-  "Logistics",
-  "Fashion",
-  "Electronics",
+  "Travel & Tours",
+  "Events & Tickets",
+  "Logistics & Delivery",
+  "Clothing & Merch",
+  "Accessories & Jewelry",
+  "Electronics & Gadgets",
   "Home & Decor",
   "Food & Beverage",
-  "Beauty",
   "Sports & Outdoor",
+  "Automotive",
+  "Pet Products & Services",
   "Collectible Product",
   "Other Product",
+  "Other Service",
   "Other",
 ];
 
@@ -185,6 +190,7 @@ function normalizeCategoryValue(v) {
   if (s === "art" || s === "painting" || s === "collectible") {
     return "Art / Collectible";
   }
+
   if (
     s === "creative & design" ||
     s === "creative and design" ||
@@ -192,10 +198,13 @@ function normalizeCategoryValue(v) {
   ) {
     return "Creative & Design";
   }
+
   if (s === "marketing" || s === "promotion") return "Marketing";
+
   if (s === "ai & automation" || s === "ai / automation" || s === "ai work") {
     return "AI & Automation";
   }
+
   if (
     s === "development & tech" ||
     s === "development / tech" ||
@@ -203,6 +212,18 @@ function normalizeCategoryValue(v) {
   ) {
     return "Development & Tech";
   }
+
+  if (
+    s === "business & professional services" ||
+    s === "business / professional services" ||
+    s === "business services" ||
+    s === "professional services" ||
+    s === "consulting" ||
+    s === "legal"
+  ) {
+    return "Business & Professional Services";
+  }
+
   if (
     s === "education & coaching" ||
     s === "education / coaching" ||
@@ -210,38 +231,107 @@ function normalizeCategoryValue(v) {
   ) {
     return "Education & Coaching";
   }
+
   if (s === "health & wellness" || s === "health / wellness") {
     return "Health & Wellness";
   }
+
   if (
-    s === "legal & consulting" ||
-    s === "legal / consulting" ||
-    s === "consulting"
+    s === "beauty & personal care" ||
+    s === "beauty / personal care" ||
+    s === "beauty"
   ) {
-    return "Legal & Consulting";
+    return "Beauty & Personal Care";
   }
+
   if (s === "home & repair" || s === "home / repair" || s === "repair") {
     return "Home & Repair";
   }
+
   if (
-    s === "events & local service" ||
-    s === "events / local service" ||
-    s === "local service" ||
-    s === "events"
+    s === "travel & tours" ||
+    s === "travel / tours" ||
+    s === "travel" ||
+    s === "tours" ||
+    s === "tourism"
   ) {
-    return "Events & Local Service";
+    return "Travel & Tours";
   }
-  if (s === "logistics") return "Logistics";
-  if (s === "fashion" || s === "apparel") return "Fashion";
-  if (s === "electronics" || s === "tech product") return "Electronics";
-  if (s === "home decor" || s === "home & decor") return "Home & Decor";
+
+  if (
+    s === "events & tickets" ||
+    s === "events / tickets" ||
+    s === "event" ||
+    s === "ticket" ||
+    s === "tickets"
+  ) {
+    return "Events & Tickets";
+  }
+
+  if (
+    s === "logistics & delivery" ||
+    s === "logistics / delivery" ||
+    s === "logistics"
+  ) {
+    return "Logistics & Delivery";
+  }
+
+  if (
+    s === "clothing & merch" ||
+    s === "clothing / merch" ||
+    s === "clothing" ||
+    s === "fashion" ||
+    s === "apparel" ||
+    s === "merch"
+  ) {
+    return "Clothing & Merch";
+  }
+
+  if (
+    s === "accessories & jewelry" ||
+    s === "accessories / jewelry" ||
+    s === "accessories" ||
+    s === "jewelry"
+  ) {
+    return "Accessories & Jewelry";
+  }
+
+  if (
+    s === "electronics & gadgets" ||
+    s === "electronics" ||
+    s === "gadgets"
+  ) {
+    return "Electronics & Gadgets";
+  }
+
+  if (s === "home decor" || s === "home & decor") {
+    return "Home & Decor";
+  }
+
   if (s === "food" || s === "food & beverage" || s === "beverage") {
     return "Food & Beverage";
   }
-  if (s === "beauty" || s === "beauty product") return "Beauty";
-  if (s === "sports" || s === "sports & outdoor") return "Sports & Outdoor";
+
+  if (s === "sports" || s === "sports & outdoor") {
+    return "Sports & Outdoor";
+  }
+
+  if (s === "automotive" || s === "auto") {
+    return "Automotive";
+  }
+
+  if (
+    s === "pet products & services" ||
+    s === "pet products / services" ||
+    s === "pets" ||
+    s === "pet"
+  ) {
+    return "Pet Products & Services";
+  }
+
   if (s === "collectible product") return "Collectible Product";
   if (s === "other product" || s === "product") return "Other Product";
+  if (s === "other service" || s === "service") return "Other Service";
 
   return "Other";
 }
@@ -992,7 +1082,8 @@ app.post(
           String(posterFile.mimetype || "").startsWith("image/")
         ) {
           aiImageBuffer = posterFile.buffer;
-          aiImageMime = posterFile.mimetype || guessMimeFromFilename(posterFile.originalname);
+          aiImageMime =
+            posterFile.mimetype || guessMimeFromFilename(posterFile.originalname);
         } else {
           try {
             aiImageBuffer = await makePosterFromVideo(file.buffer);
@@ -1040,23 +1131,23 @@ ${AI_ALLOWED_CATEGORIES.map((x) => `- ${x}`).join("\n")}
 
 3. itemType should be short and useful.
    Examples:
-   "T-shirt", "Coffee", "Chocolate", "Website", "Consultation", "Coaching", "Artwork", "Collectible", "Repair Service", "Interior Design"
+   "T-shirt", "Hoodie", "Merch", "Jewelry", "Coffee", "Chocolate", "Ticket", "Tour", "Travel Plan", "Website", "Consultation", "Coaching", "Artwork", "Collectible", "Repair Service"
 
 4. itemLabel should be the concrete offer.
    Examples:
-   "Graphic T-shirt", "1:1 Fitness Coaching", "Landing Page Design", "Coffee Bag", "Vintage Lamp"
+   "Graphic T-shirt", "1:1 Fitness Coaching", "Landing Page Design", "Coffee Bag", "City Walking Tour", "Event Ticket", "Vintage Lamp"
 
 5. subcategory should be a niche or style.
    Examples:
-   "Streetwear", "Yoga Coaching", "Brand Identity", "Home Repair", "Handmade Product"
+   "Streetwear", "Yoga Coaching", "Brand Identity", "Home Repair", "Handmade Product", "City Landmarks", "Luxury Accessories"
 
 6. title should be short and marketplace-friendly.
 
 7. fulfillmentType:
    - "PHYSICAL_GOOD" for real physical products / merch / packaged goods / objects
-   - "DIGITAL_SERVICE" for websites, branding, design, automation, digital work
+   - "DIGITAL_SERVICE" for websites, branding, design, automation, digital work, travel plans, documents
    - "ONLINE_SESSION" for coaching, consultation, lesson, training, remote calls
-   - "LOCAL_SERVICE" for repair, local visits, in-person service, offline work
+   - "LOCAL_SERVICE" for repair, local visits, in-person service, offline work, tours, event entry
    - null if it looks like a normal collectible/art NFT
 
 8. suggestedMarketType:
