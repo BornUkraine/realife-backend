@@ -61,6 +61,284 @@ function resolveContractAlias(raw) {
   return "";
 }
 
+function safeTrim(v) {
+  const s = String(v || "").trim();
+  return s || null;
+}
+
+function normalizeFulfillmentType(v) {
+  const s = String(v || "").trim().toLowerCase();
+  if (!s) return null;
+
+  if (
+    s === "physical_good" ||
+    s === "physical good" ||
+    s === "physical" ||
+    s === "good" ||
+    s === "product" ||
+    s === "physical_product" ||
+    s === "delivery"
+  ) {
+    return "PHYSICAL_GOOD";
+  }
+
+  if (
+    s === "digital_service" ||
+    s === "digital service" ||
+    s === "digital" ||
+    s === "service" ||
+    s === "work"
+  ) {
+    return "DIGITAL_SERVICE";
+  }
+
+  if (
+    s === "online_session" ||
+    s === "online session" ||
+    s === "online" ||
+    s === "session" ||
+    s === "call" ||
+    s === "consultation"
+  ) {
+    return "ONLINE_SESSION";
+  }
+
+  if (
+    s === "local_service" ||
+    s === "local service" ||
+    s === "local" ||
+    s === "offline" ||
+    s === "in_person" ||
+    s === "inperson"
+  ) {
+    return "LOCAL_SERVICE";
+  }
+
+  return null;
+}
+
+function normalizeSuggestedMarketType(v) {
+  const s = String(v || "").trim().toLowerCase();
+  if (s === "protected") return "protected";
+  if (s === "standard") return "standard";
+  return null;
+}
+
+function normalizeAiPath(v) {
+  const s = String(v || "").trim().toLowerCase();
+  if (s === "physical_product" || s === "physical product") {
+    return "physical_product";
+  }
+  if (s === "service") return "service";
+  if (s === "collectible") return "collectible";
+  return null;
+}
+
+function humanFulfillmentType(v) {
+  if (v === "PHYSICAL_GOOD") return "Physical Good";
+  if (v === "DIGITAL_SERVICE") return "Digital Service";
+  if (v === "ONLINE_SESSION") return "Online Session";
+  if (v === "LOCAL_SERVICE") return "Local Service";
+  return null;
+}
+
+function inferSuggestedMarketType({
+  fulfillmentType,
+  deliveryEnabled,
+  physicalItemIncluded,
+}) {
+  if (fulfillmentType) return "protected";
+  if (deliveryEnabled || physicalItemIncluded) return "protected";
+  return "standard";
+}
+
+const AI_ALLOWED_CATEGORIES = [
+  "Art / Collectible",
+  "Creative & Design",
+  "Marketing",
+  "AI & Automation",
+  "Development & Tech",
+  "Education & Coaching",
+  "Health & Wellness",
+  "Legal & Consulting",
+  "Home & Repair",
+  "Events & Local Service",
+  "Logistics",
+  "Fashion",
+  "Electronics",
+  "Home & Decor",
+  "Food & Beverage",
+  "Beauty",
+  "Sports & Outdoor",
+  "Collectible Product",
+  "Other Product",
+  "Other",
+];
+
+function normalizeCategoryValue(v) {
+  const s = String(v || "").trim().toLowerCase();
+  if (!s) return "Other";
+
+  const direct = AI_ALLOWED_CATEGORIES.find((x) => x.toLowerCase() === s);
+  if (direct) return direct;
+
+  if (s === "art" || s === "painting" || s === "collectible") {
+    return "Art / Collectible";
+  }
+  if (
+    s === "creative & design" ||
+    s === "creative and design" ||
+    s === "design"
+  ) {
+    return "Creative & Design";
+  }
+  if (s === "marketing" || s === "promotion") return "Marketing";
+  if (s === "ai & automation" || s === "ai / automation" || s === "ai work") {
+    return "AI & Automation";
+  }
+  if (
+    s === "development & tech" ||
+    s === "development / tech" ||
+    s === "tech"
+  ) {
+    return "Development & Tech";
+  }
+  if (
+    s === "education & coaching" ||
+    s === "education / coaching" ||
+    s === "education"
+  ) {
+    return "Education & Coaching";
+  }
+  if (s === "health & wellness" || s === "health / wellness") {
+    return "Health & Wellness";
+  }
+  if (
+    s === "legal & consulting" ||
+    s === "legal / consulting" ||
+    s === "consulting"
+  ) {
+    return "Legal & Consulting";
+  }
+  if (s === "home & repair" || s === "home / repair" || s === "repair") {
+    return "Home & Repair";
+  }
+  if (
+    s === "events & local service" ||
+    s === "events / local service" ||
+    s === "local service" ||
+    s === "events"
+  ) {
+    return "Events & Local Service";
+  }
+  if (s === "logistics") return "Logistics";
+  if (s === "fashion" || s === "apparel") return "Fashion";
+  if (s === "electronics" || s === "tech product") return "Electronics";
+  if (s === "home decor" || s === "home & decor") return "Home & Decor";
+  if (s === "food" || s === "food & beverage" || s === "beverage") {
+    return "Food & Beverage";
+  }
+  if (s === "beauty" || s === "beauty product") return "Beauty";
+  if (s === "sports" || s === "sports & outdoor") return "Sports & Outdoor";
+  if (s === "collectible product") return "Collectible Product";
+  if (s === "other product" || s === "product") return "Other Product";
+
+  return "Other";
+}
+
+function guessMimeFromFilename(filename) {
+  const f = String(filename || "").toLowerCase();
+
+  if (f.endsWith(".png")) return "image/png";
+  if (f.endsWith(".webp")) return "image/webp";
+  if (f.endsWith(".gif")) return "image/gif";
+  if (f.endsWith(".jpg") || f.endsWith(".jpeg")) return "image/jpeg";
+  return "image/jpeg";
+}
+
+function bufferToDataUrl(buffer, mime) {
+  return `data:${mime};base64,${buffer.toString("base64")}`;
+}
+
+function safeJsonParse(v, fallback = null) {
+  try {
+    return JSON.parse(v);
+  } catch {
+    return fallback;
+  }
+}
+
+function pickResponseText(responseData) {
+  if (typeof responseData?.output_text === "string" && responseData.output_text) {
+    return responseData.output_text;
+  }
+
+  const output = Array.isArray(responseData?.output) ? responseData.output : [];
+  for (const item of output) {
+    const content = Array.isArray(item?.content) ? item.content : [];
+    for (const part of content) {
+      if (typeof part?.text === "string" && part.text) return part.text;
+      if (typeof part?.output_text === "string" && part.output_text) {
+        return part.output_text;
+      }
+    }
+  }
+
+  return "";
+}
+
+function normalizeAiSuggestion(raw, deliveryMode = "none") {
+  const path = normalizeAiPath(raw?.path);
+  const category = normalizeCategoryValue(raw?.category);
+  const itemType = safeTrim(raw?.itemType);
+  const itemLabel = safeTrim(raw?.itemLabel);
+  const subcategory = safeTrim(raw?.subcategory);
+  const title = safeTrim(raw?.title);
+  const brand = safeTrim(raw?.brand);
+  const reasoning = safeTrim(raw?.reasoning);
+
+  let fulfillmentType =
+    normalizeFulfillmentType(raw?.fulfillmentType) ||
+    (path === "physical_product"
+      ? "PHYSICAL_GOOD"
+      : path === "service"
+      ? "DIGITAL_SERVICE"
+      : null);
+
+  let suggestedMarketType =
+    normalizeSuggestedMarketType(raw?.suggestedMarketType) ||
+    (fulfillmentType ? "protected" : "standard");
+
+  let finalPath = path;
+
+  if (String(deliveryMode || "").trim().toLowerCase() === "delivery") {
+    finalPath = "physical_product";
+    fulfillmentType = "PHYSICAL_GOOD";
+    suggestedMarketType = "protected";
+  }
+
+  const searchTags = Array.isArray(raw?.searchTags)
+    ? raw.searchTags
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .slice(0, 12)
+    : [];
+
+  return {
+    path: finalPath,
+    category,
+    itemType,
+    itemLabel,
+    subcategory,
+    title,
+    brand,
+    fulfillmentType,
+    suggestedMarketType,
+    reasoning,
+    searchTags,
+  };
+}
+
 /* =========================
    ABI (READ-ONLY) — 1155 ONLY
    Works for:
@@ -147,10 +425,6 @@ async function headContentType(url) {
 
 /* =========================
    AUTO-POSTER HELPERS (ffmpeg)
-   ✅ Install in backend:
-      npm i ffmpeg-static
-   ✅ Optional env fallback:
-      DEFAULT_VIDEO_POSTER = ipfs://<CID>   (must be IMAGE)
 ========================= */
 async function runFfmpeg(args) {
   if (!ffmpegPath) throw new Error("ffmpeg binary not found (ffmpeg-static)");
@@ -383,6 +657,7 @@ async function build1155MetadataResponse(contract1155, tokenId) {
   let animation_url = null;
   let originalAttributes = [];
   let category = null;
+  let subcategory = null;
   let project = null;
   let collection = null;
   let item = null;
@@ -397,6 +672,8 @@ async function build1155MetadataResponse(contract1155, tokenId) {
   let vertical = null;
   let proof = null;
   let external_url = null;
+  let fulfillmentType = null;
+  let suggestedMarketType = null;
 
   if (tokenUri) {
     try {
@@ -414,6 +691,7 @@ async function build1155MetadataResponse(contract1155, tokenId) {
         null;
 
       category = originalMetadata.data?.category ?? null;
+      subcategory = originalMetadata.data?.subcategory ?? null;
       project = originalMetadata.data?.project ?? null;
       collection = originalMetadata.data?.collection ?? null;
       item = originalMetadata.data?.item ?? null;
@@ -436,6 +714,12 @@ async function build1155MetadataResponse(contract1155, tokenId) {
       physicalItemIncluded = toBool(originalMetadata.data?.physicalItemIncluded);
       officialItem = toBool(originalMetadata.data?.officialItem);
 
+      fulfillmentType = normalizeFulfillmentType(
+        originalMetadata.data?.fulfillmentType
+      );
+
+      suggestedMarketType = safeTrim(originalMetadata.data?.suggestedMarketType);
+
       originalAttributes = Array.isArray(originalMetadata.data?.attributes)
         ? originalMetadata.data.attributes
         : [];
@@ -457,6 +741,20 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     }
   }
 
+  if (!fulfillmentType) {
+    if (deliveryEnabled || physicalItemIncluded || deliveryMode === "delivery") {
+      fulfillmentType = "PHYSICAL_GOOD";
+    }
+  }
+
+  if (!suggestedMarketType) {
+    suggestedMarketType = inferSuggestedMarketType({
+      fulfillmentType,
+      deliveryEnabled,
+      physicalItemIncluded,
+    });
+  }
+
   const block = await client.getBlock();
 
   const imageHttp = image ? ipfsToHttp(image) : null;
@@ -471,6 +769,7 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     ...(max > 0n ? [{ trait_type: "Max Supply", value: max.toString() }] : []),
     ...(creator ? [{ trait_type: "Creator", value: creator }] : []),
     ...(category ? [{ trait_type: "Category", value: category }] : []),
+    ...(subcategory ? [{ trait_type: "Subcategory", value: subcategory }] : []),
     ...(project ? [{ trait_type: "Project", value: project }] : []),
     ...(brandProject ? [{ trait_type: "Brand Project", value: brandProject }] : []),
     ...(brand ? [{ trait_type: "Brand", value: brand }] : []),
@@ -479,6 +778,14 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     ...(itemType ? [{ trait_type: "Item Type", value: itemType }] : []),
     ...(rarity ? [{ trait_type: "Rarity", value: rarity }] : []),
     ...(vertical ? [{ trait_type: "Vertical", value: vertical }] : []),
+    ...(humanFulfillmentType(fulfillmentType)
+      ? [
+          {
+            trait_type: "Fulfillment Type",
+            value: humanFulfillmentType(fulfillmentType),
+          },
+        ]
+      : []),
     {
       trait_type: "Delivery Mode",
       value: deliveryMode === "delivery" ? "With delivery" : "Without delivery",
@@ -489,6 +796,10 @@ async function build1155MetadataResponse(contract1155, tokenId) {
       value: physicalItemIncluded ? "Yes" : "No",
     },
     { trait_type: "Official Item", value: officialItem ? "Yes" : "No" },
+    {
+      trait_type: "Suggested Market",
+      value: suggestedMarketType === "protected" ? "Protected" : "Standard",
+    },
     ...(isUnique ? [{ trait_type: "Unique", value: "Yes" }] : []),
     ...originalAttributes,
     { trait_type: "Contract", value: contract1155 },
@@ -509,6 +820,7 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     animation_url: animHttp,
 
     category,
+    subcategory,
     project,
     brandProject,
     brand,
@@ -525,6 +837,9 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     deliveryEnabled,
     physicalItemIncluded,
     officialItem,
+
+    fulfillmentType,
+    suggestedMarketType,
 
     attributes,
   };
@@ -580,7 +895,7 @@ app.use(express.json());
 ========================= */
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
+  limits: { fileSize: 100 * 1024 * 1024 },
 });
 
 /* =========================
@@ -595,6 +910,10 @@ app.get("/", (_req, res) => {
     contracts: {
       standard1155: REALIFE_1155_STANDARD_CONTRACT || null,
       delivery1155: REALIFE_1155_DELIVERY_CONTRACT || null,
+    },
+    aiSuggest: {
+      enabled: Boolean(process.env.OPENAI_API_KEY),
+      model: process.env.OPENAI_AI_SUGGEST_MODEL || "gpt-5.4-mini",
     },
   });
 });
@@ -624,9 +943,270 @@ async function pinFileToIpfs(buffer, filename, jwt) {
 }
 
 /* =========================
+   AI SUGGEST
+========================= */
+app.post(
+  "/api/ai-suggest",
+  upload.fields([
+    { name: "file", maxCount: 1 },
+    { name: "poster", maxCount: 1 },
+  ]),
+  async (req, res) => {
+    try {
+      if (!process.env.OPENAI_API_KEY) {
+        return res.status(500).json({
+          status: "error",
+          message: "OPENAI_API_KEY is missing",
+        });
+      }
+
+      const model = process.env.OPENAI_AI_SUGGEST_MODEL || "gpt-5.4-mini";
+
+      const {
+        name,
+        description,
+        project,
+        brand,
+        deliveryMode,
+      } = req.body || {};
+
+      const fileArr = req.files?.file || [];
+      const posterArr = req.files?.poster || [];
+      const file = fileArr[0] || null;
+      const posterFile = posterArr[0] || null;
+
+      if (!file) {
+        return res.status(400).json({
+          status: "error",
+          message: "File is required",
+        });
+      }
+
+      const isVideo = String(file.mimetype || "").startsWith("video/");
+      let aiImageBuffer = null;
+      let aiImageMime = "image/jpeg";
+
+      if (isVideo) {
+        if (
+          posterFile &&
+          String(posterFile.mimetype || "").startsWith("image/")
+        ) {
+          aiImageBuffer = posterFile.buffer;
+          aiImageMime = posterFile.mimetype || guessMimeFromFilename(posterFile.originalname);
+        } else {
+          try {
+            aiImageBuffer = await makePosterFromVideo(file.buffer);
+            aiImageMime = "image/jpeg";
+          } catch {
+            aiImageBuffer = null;
+          }
+        }
+      } else if (String(file.mimetype || "").startsWith("image/")) {
+        aiImageBuffer = file.buffer;
+        aiImageMime = file.mimetype || guessMimeFromFilename(file.originalname);
+      }
+
+      if (!aiImageBuffer) {
+        return res.status(400).json({
+          status: "error",
+          message:
+            "AI suggest needs an image. For video, upload poster or allow server poster extraction.",
+        });
+      }
+
+      const imageDataUrl = bufferToDataUrl(aiImageBuffer, aiImageMime);
+      const currentDeliveryMode =
+        String(deliveryMode || "").trim().toLowerCase() === "delivery"
+          ? "delivery"
+          : "none";
+
+      const systemPrompt = `
+You classify uploaded NFT media for a Web3 marketplace called Realife.
+
+Return only valid JSON matching the schema.
+
+Goal:
+- Understand what the uploaded image most likely represents.
+- Suggest the best marketplace structure.
+
+Rules:
+1. path must be one of:
+   - "collectible"
+   - "service"
+   - "physical_product"
+
+2. category must be one of:
+${AI_ALLOWED_CATEGORIES.map((x) => `- ${x}`).join("\n")}
+
+3. itemType should be short and useful.
+   Examples:
+   "T-shirt", "Coffee", "Chocolate", "Website", "Consultation", "Coaching", "Artwork", "Collectible", "Repair Service", "Interior Design"
+
+4. itemLabel should be the concrete offer.
+   Examples:
+   "Graphic T-shirt", "1:1 Fitness Coaching", "Landing Page Design", "Coffee Bag", "Vintage Lamp"
+
+5. subcategory should be a niche or style.
+   Examples:
+   "Streetwear", "Yoga Coaching", "Brand Identity", "Home Repair", "Handmade Product"
+
+6. title should be short and marketplace-friendly.
+
+7. fulfillmentType:
+   - "PHYSICAL_GOOD" for real physical products / merch / packaged goods / objects
+   - "DIGITAL_SERVICE" for websites, branding, design, automation, digital work
+   - "ONLINE_SESSION" for coaching, consultation, lesson, training, remote calls
+   - "LOCAL_SERVICE" for repair, local visits, in-person service, offline work
+   - null if it looks like a normal collectible/art NFT
+
+8. suggestedMarketType:
+   - "protected" if fulfillmentType is not null
+   - "standard" if collectible
+
+9. If the current deliveryMode from the user is "delivery", force:
+   - path = "physical_product"
+   - fulfillmentType = "PHYSICAL_GOOD"
+   - suggestedMarketType = "protected"
+
+10. Prefer practical marketplace classification over artistic interpretation.
+`;
+
+      const userText = [
+        `Current delivery mode: ${currentDeliveryMode}`,
+        `Project: ${String(project || "").trim() || "Realife"}`,
+        `Current name: ${String(name || "").trim() || ""}`,
+        `Current brand: ${String(brand || "").trim() || ""}`,
+        `Current description: ${String(description || "").trim() || ""}`,
+        `Task: analyze the uploaded media and classify it for marketplace minting.`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      const schema = {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          path: {
+            type: "string",
+            enum: ["collectible", "service", "physical_product"],
+          },
+          category: {
+            type: "string",
+            enum: AI_ALLOWED_CATEGORIES,
+          },
+          itemType: { type: ["string", "null"] },
+          itemLabel: { type: ["string", "null"] },
+          subcategory: { type: ["string", "null"] },
+          title: { type: ["string", "null"] },
+          brand: { type: ["string", "null"] },
+          fulfillmentType: {
+            type: ["string", "null"],
+            enum: [
+              "PHYSICAL_GOOD",
+              "DIGITAL_SERVICE",
+              "ONLINE_SESSION",
+              "LOCAL_SERVICE",
+              null,
+            ],
+          },
+          suggestedMarketType: {
+            type: "string",
+            enum: ["standard", "protected"],
+          },
+          reasoning: { type: ["string", "null"] },
+          searchTags: {
+            type: "array",
+            items: { type: "string" },
+          },
+        },
+        required: [
+          "path",
+          "category",
+          "itemType",
+          "itemLabel",
+          "subcategory",
+          "title",
+          "brand",
+          "fulfillmentType",
+          "suggestedMarketType",
+          "reasoning",
+          "searchTags",
+        ],
+      };
+
+      const openaiRes = await axios.post(
+        "https://api.openai.com/v1/responses",
+        {
+          model,
+          store: false,
+          input: [
+            {
+              role: "system",
+              content: [{ type: "input_text", text: systemPrompt.trim() }],
+            },
+            {
+              role: "user",
+              content: [
+                { type: "input_text", text: userText },
+                {
+                  type: "input_image",
+                  image_url: imageDataUrl,
+                },
+              ],
+            },
+          ],
+          text: {
+            format: {
+              type: "json_schema",
+              name: "realife_ai_suggest",
+              strict: true,
+              schema,
+            },
+          },
+        },
+        {
+          timeout: 90_000,
+          headers: {
+            Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const rawText = pickResponseText(openaiRes.data);
+      const parsed = safeJsonParse(rawText, null);
+
+      if (!parsed || typeof parsed !== "object") {
+        console.error("AI_SUGGEST_PARSE_ERROR", rawText);
+        return res.status(500).json({
+          status: "error",
+          message: "AI suggest parse failed",
+        });
+      }
+
+      const suggestion = normalizeAiSuggestion(parsed, currentDeliveryMode);
+
+      return res.json({
+        status: "ok",
+        model,
+        suggestion,
+      });
+    } catch (err) {
+      console.error(
+        "AI_SUGGEST_ERROR:",
+        err?.response?.data || err?.message || err
+      );
+
+      return res.status(500).json({
+        status: "error",
+        message: "AI suggest failed",
+      });
+    }
+  }
+);
+
+/* =========================
    MINT PREPARE (UPLOAD + METADATA)
-   - Returns tokenURI (metadataUri)
-   - Frontend calls 1155 contract createEdition(supply, tokenURI)
 ========================= */
 app.post(
   "/api/mint/prepare",
@@ -640,10 +1220,12 @@ app.post(
         name,
         description,
         category,
+        subcategory,
         project,
         brandProject,
         brand,
         itemType,
+        fulfillmentType,
         deliveryMode,
         supply,
         proofUrl,
@@ -729,6 +1311,7 @@ app.post(
       const safeName = String(name || "").trim();
       const safeDescription = String(description || "").trim();
       const safeCategory = String(category || "Other").trim();
+      const safeSubcategory = safeTrim(subcategory);
       const safeProject = String(project || "Realife").trim();
 
       const safeBrandProject = String(
@@ -760,6 +1343,20 @@ app.post(
 
       const safeOfficialItem = toBool(officialItem);
 
+      const finalFulfillmentType =
+        normalizeFulfillmentType(fulfillmentType) ||
+        (safeDeliveryEnabled ||
+        safePhysicalItemIncluded ||
+        safeDeliveryMode === "delivery"
+          ? "PHYSICAL_GOOD"
+          : null);
+
+      const suggestedMarketType = inferSuggestedMarketType({
+        fulfillmentType: finalFulfillmentType,
+        deliveryEnabled: safeDeliveryEnabled,
+        physicalItemIncluded: safePhysicalItemIncluded,
+      });
+
       const shouldIncludeDeliveryAttributes =
         safeVertical === "store" ||
         safeVertical === "cafe" ||
@@ -776,11 +1373,22 @@ app.post(
           : []),
         ...(safeBrand ? [{ trait_type: "Brand", value: safeBrand }] : []),
         { trait_type: "Category", value: safeCategory },
+        ...(safeSubcategory
+          ? [{ trait_type: "Subcategory", value: safeSubcategory }]
+          : []),
         ...(safeItem ? [{ trait_type: "Item", value: safeItem }] : []),
         ...(safeItemType ? [{ trait_type: "Item Type", value: safeItemType }] : []),
         ...(safeDrink ? [{ trait_type: "Drink", value: safeDrink }] : []),
         ...(safeRarity ? [{ trait_type: "Rarity", value: safeRarity }] : []),
         ...(safeVertical ? [{ trait_type: "Vertical", value: safeVertical }] : []),
+        ...(humanFulfillmentType(finalFulfillmentType)
+          ? [
+              {
+                trait_type: "Fulfillment Type",
+                value: humanFulfillmentType(finalFulfillmentType),
+              },
+            ]
+          : []),
         {
           trait_type: "Delivery Mode",
           value:
@@ -804,6 +1412,10 @@ app.post(
               },
             ]
           : []),
+        {
+          trait_type: "Suggested Market",
+          value: suggestedMarketType === "protected" ? "Protected" : "Standard",
+        },
         { trait_type: "Supply", value: String(safeSupply) },
       ];
 
@@ -812,6 +1424,7 @@ app.post(
         description: safeDescription,
 
         category: safeCategory,
+        subcategory: safeSubcategory,
         project: safeProject,
         brandProject: safeBrandProject,
         brand: safeBrand,
@@ -828,6 +1441,9 @@ app.post(
         physicalItemIncluded: safePhysicalItemIncluded,
         officialItem: safeOfficialItem,
 
+        fulfillmentType: finalFulfillmentType,
+        suggestedMarketType,
+
         proof: safeProofUrl,
         external_url: safeExternalUrl,
         attributes,
@@ -835,7 +1451,7 @@ app.post(
 
       if (isVideo) {
         metadata.animation_url = mediaUri;
-        metadata.image = posterUri; // ✅ always image
+        metadata.image = posterUri;
       } else {
         metadata.image = mediaUri;
       }
@@ -867,6 +1483,7 @@ app.post(
         preview: {
           name: metadata.name,
           category: metadata.category,
+          subcategory: metadata.subcategory,
           project: metadata.project,
           brandProject: metadata.brandProject,
           brand: metadata.brand,
@@ -880,6 +1497,8 @@ app.post(
           deliveryEnabled: metadata.deliveryEnabled,
           physicalItemIncluded: metadata.physicalItemIncluded,
           officialItem: metadata.officialItem,
+          fulfillmentType: metadata.fulfillmentType,
+          suggestedMarketType: metadata.suggestedMarketType,
           kind: isVideo ? "video" : "image",
           media: isVideo ? metadata.animation_url : metadata.image,
           poster: isVideo ? metadata.image : null,
@@ -898,11 +1517,6 @@ app.post(
 
 /* =========================
    DYNAMIC NFT METADATA (ERC-1155)
-   NEW:
-   - GET /metadata1155/:contract/:tokenId
-   LEGACY:
-   - GET /metadata1155/:tokenId
-   - GET /metadata1155/:tokenId?contract=0x...
 ========================= */
 app.get("/metadata1155/:contract/:tokenId", async (req, res) => {
   const explicitContract = String(req.params.contract || "").trim();
@@ -923,5 +1537,9 @@ app.listen(PORT, () => {
   console.log("[1155 contracts]", {
     standard: REALIFE_1155_STANDARD_CONTRACT || null,
     delivery: REALIFE_1155_DELIVERY_CONTRACT || null,
+  });
+  console.log("[ai-suggest]", {
+    enabled: Boolean(process.env.OPENAI_API_KEY),
+    model: process.env.OPENAI_AI_SUGGEST_MODEL || "gpt-5.4-mini",
   });
 });
