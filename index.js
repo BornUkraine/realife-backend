@@ -158,6 +158,7 @@ const AI_ALLOWED_CATEGORIES = [
   "Marketing",
   "AI & Automation",
   "Development & Tech",
+<<<<<<< HEAD
   "Business & Professional Services",
   "Education & Coaching",
   "Health & Wellness",
@@ -177,6 +178,22 @@ const AI_ALLOWED_CATEGORIES = [
   "Collectible Product",
   "Other Product",
   "Other Service",
+=======
+  "Education & Coaching",
+  "Health & Wellness",
+  "Legal & Consulting",
+  "Home & Repair",
+  "Events & Local Service",
+  "Logistics",
+  "Fashion",
+  "Electronics",
+  "Home & Decor",
+  "Food & Beverage",
+  "Beauty",
+  "Sports & Outdoor",
+  "Collectible Product",
+  "Other Product",
+>>>>>>> ea5ac1a210a05959f4beff907b71744b9cecbe7d
   "Other",
 ];
 
@@ -190,7 +207,10 @@ function normalizeCategoryValue(v) {
   if (s === "art" || s === "painting" || s === "collectible") {
     return "Art / Collectible";
   }
+<<<<<<< HEAD
 
+=======
+>>>>>>> ea5ac1a210a05959f4beff907b71744b9cecbe7d
   if (
     s === "creative & design" ||
     s === "creative and design" ||
@@ -198,6 +218,7 @@ function normalizeCategoryValue(v) {
   ) {
     return "Creative & Design";
   }
+<<<<<<< HEAD
 
   if (s === "marketing" || s === "promotion") return "Marketing";
 
@@ -205,6 +226,12 @@ function normalizeCategoryValue(v) {
     return "AI & Automation";
   }
 
+=======
+  if (s === "marketing" || s === "promotion") return "Marketing";
+  if (s === "ai & automation" || s === "ai / automation" || s === "ai work") {
+    return "AI & Automation";
+  }
+>>>>>>> ea5ac1a210a05959f4beff907b71744b9cecbe7d
   if (
     s === "development & tech" ||
     s === "development / tech" ||
@@ -212,6 +239,7 @@ function normalizeCategoryValue(v) {
   ) {
     return "Development & Tech";
   }
+<<<<<<< HEAD
 
   if (
     s === "business & professional services" ||
@@ -224,6 +252,8 @@ function normalizeCategoryValue(v) {
     return "Business & Professional Services";
   }
 
+=======
+>>>>>>> ea5ac1a210a05959f4beff907b71744b9cecbe7d
   if (
     s === "education & coaching" ||
     s === "education / coaching" ||
@@ -231,6 +261,7 @@ function normalizeCategoryValue(v) {
   ) {
     return "Education & Coaching";
   }
+<<<<<<< HEAD
 
   if (s === "health & wellness" || s === "health / wellness") {
     return "Health & Wellness";
@@ -332,6 +363,40 @@ function normalizeCategoryValue(v) {
   if (s === "collectible product") return "Collectible Product";
   if (s === "other product" || s === "product") return "Other Product";
   if (s === "other service" || s === "service") return "Other Service";
+=======
+  if (s === "health & wellness" || s === "health / wellness") {
+    return "Health & Wellness";
+  }
+  if (
+    s === "legal & consulting" ||
+    s === "legal / consulting" ||
+    s === "consulting"
+  ) {
+    return "Legal & Consulting";
+  }
+  if (s === "home & repair" || s === "home / repair" || s === "repair") {
+    return "Home & Repair";
+  }
+  if (
+    s === "events & local service" ||
+    s === "events / local service" ||
+    s === "local service" ||
+    s === "events"
+  ) {
+    return "Events & Local Service";
+  }
+  if (s === "logistics") return "Logistics";
+  if (s === "fashion" || s === "apparel") return "Fashion";
+  if (s === "electronics" || s === "tech product") return "Electronics";
+  if (s === "home decor" || s === "home & decor") return "Home & Decor";
+  if (s === "food" || s === "food & beverage" || s === "beverage") {
+    return "Food & Beverage";
+  }
+  if (s === "beauty" || s === "beauty product") return "Beauty";
+  if (s === "sports" || s === "sports & outdoor") return "Sports & Outdoor";
+  if (s === "collectible product") return "Collectible Product";
+  if (s === "other product" || s === "product") return "Other Product";
+>>>>>>> ea5ac1a210a05959f4beff907b71744b9cecbe7d
 
   return "Other";
 }
@@ -1082,8 +1147,12 @@ app.post(
           String(posterFile.mimetype || "").startsWith("image/")
         ) {
           aiImageBuffer = posterFile.buffer;
+<<<<<<< HEAD
           aiImageMime =
             posterFile.mimetype || guessMimeFromFilename(posterFile.originalname);
+=======
+          aiImageMime = posterFile.mimetype || guessMimeFromFilename(posterFile.originalname);
+>>>>>>> ea5ac1a210a05959f4beff907b71744b9cecbe7d
         } else {
           try {
             aiImageBuffer = await makePosterFromVideo(file.buffer);
@@ -1131,6 +1200,7 @@ ${AI_ALLOWED_CATEGORIES.map((x) => `- ${x}`).join("\n")}
 
 3. itemType should be short and useful.
    Examples:
+<<<<<<< HEAD
    "T-shirt", "Hoodie", "Merch", "Jewelry", "Coffee", "Chocolate", "Ticket", "Tour", "Travel Plan", "Website", "Consultation", "Coaching", "Artwork", "Collectible", "Repair Service"
 
 4. itemLabel should be the concrete offer.
@@ -1140,14 +1210,31 @@ ${AI_ALLOWED_CATEGORIES.map((x) => `- ${x}`).join("\n")}
 5. subcategory should be a niche or style.
    Examples:
    "Streetwear", "Yoga Coaching", "Brand Identity", "Home Repair", "Handmade Product", "City Landmarks", "Luxury Accessories"
+=======
+   "T-shirt", "Coffee", "Chocolate", "Website", "Consultation", "Coaching", "Artwork", "Collectible", "Repair Service", "Interior Design"
+
+4. itemLabel should be the concrete offer.
+   Examples:
+   "Graphic T-shirt", "1:1 Fitness Coaching", "Landing Page Design", "Coffee Bag", "Vintage Lamp"
+
+5. subcategory should be a niche or style.
+   Examples:
+   "Streetwear", "Yoga Coaching", "Brand Identity", "Home Repair", "Handmade Product"
+>>>>>>> ea5ac1a210a05959f4beff907b71744b9cecbe7d
 
 6. title should be short and marketplace-friendly.
 
 7. fulfillmentType:
    - "PHYSICAL_GOOD" for real physical products / merch / packaged goods / objects
+<<<<<<< HEAD
    - "DIGITAL_SERVICE" for websites, branding, design, automation, digital work, travel plans, documents
    - "ONLINE_SESSION" for coaching, consultation, lesson, training, remote calls
    - "LOCAL_SERVICE" for repair, local visits, in-person service, offline work, tours, event entry
+=======
+   - "DIGITAL_SERVICE" for websites, branding, design, automation, digital work
+   - "ONLINE_SESSION" for coaching, consultation, lesson, training, remote calls
+   - "LOCAL_SERVICE" for repair, local visits, in-person service, offline work
+>>>>>>> ea5ac1a210a05959f4beff907b71744b9cecbe7d
    - null if it looks like a normal collectible/art NFT
 
 8. suggestedMarketType:
@@ -1633,4 +1720,8 @@ app.listen(PORT, () => {
     enabled: Boolean(process.env.OPENAI_API_KEY),
     model: process.env.OPENAI_AI_SUGGEST_MODEL || "gpt-5.4-mini",
   });
+<<<<<<< HEAD
 });
+=======
+});
+>>>>>>> ea5ac1a210a05959f4beff907b71744b9cecbe7d
