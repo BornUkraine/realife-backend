@@ -109,6 +109,7 @@ function normalizeFulfillmentType(v) {
     s === "local" ||
     s === "offline" ||
     s === "in_person" ||
+    s === "in person" ||
     s === "inperson"
   ) {
     return "LOCAL_SERVICE";
@@ -138,7 +139,7 @@ function humanFulfillmentType(v) {
   if (v === "PHYSICAL_GOOD") return "Physical Good";
   if (v === "DIGITAL_SERVICE") return "Digital Service";
   if (v === "ONLINE_SESSION") return "Online Session";
-  if (v === "LOCAL_SERVICE") return "Local Service";
+  if (v === "LOCAL_SERVICE") return "Local / Offline Service";
   return null;
 }
 
@@ -765,6 +766,11 @@ async function build1155MetadataResponse(contract1155, tokenId) {
   let fulfillmentType = null;
   let suggestedMarketType = null;
 
+  // ✅ Local / offline service location
+  let serviceCountry = null;
+  let serviceCity = null;
+  let serviceArea = null;
+
   if (tokenUri) {
     try {
       const metadataUrl = ipfsToHttp(tokenUri);
@@ -810,6 +816,11 @@ async function build1155MetadataResponse(contract1155, tokenId) {
 
       suggestedMarketType = safeTrim(originalMetadata.data?.suggestedMarketType);
 
+      // ✅ Read local/offline service location from metadata
+      serviceCountry = safeTrim(originalMetadata.data?.serviceCountry);
+      serviceCity = safeTrim(originalMetadata.data?.serviceCity);
+      serviceArea = safeTrim(originalMetadata.data?.serviceArea);
+
       originalAttributes = Array.isArray(originalMetadata.data?.attributes)
         ? originalMetadata.data.attributes
         : [];
@@ -835,6 +846,14 @@ async function build1155MetadataResponse(contract1155, tokenId) {
     if (deliveryEnabled || physicalItemIncluded || deliveryMode === "delivery") {
       fulfillmentType = "PHYSICAL_GOOD";
     }
+  }
+
+  const isLocalService = fulfillmentType === "LOCAL_SERVICE";
+
+  if (!isLocalService) {
+    serviceCountry = null;
+    serviceCity = null;
+    serviceArea = null;
   }
 
   if (!suggestedMarketType) {
@@ -876,6 +895,14 @@ async function build1155MetadataResponse(contract1155, tokenId) {
           },
         ]
       : []),
+
+    // ✅ Local / offline service location attributes
+    ...(serviceCountry
+      ? [{ trait_type: "Service Country", value: serviceCountry }]
+      : []),
+    ...(serviceCity ? [{ trait_type: "Service City", value: serviceCity }] : []),
+    ...(serviceArea ? [{ trait_type: "Service Area", value: serviceArea }] : []),
+
     {
       trait_type: "Delivery Mode",
       value: deliveryMode === "delivery" ? "With delivery" : "Without delivery",
@@ -930,6 +957,11 @@ async function build1155MetadataResponse(contract1155, tokenId) {
 
     fulfillmentType,
     suggestedMarketType,
+
+    // ✅ Local / offline service location
+    serviceCountry,
+    serviceCity,
+    serviceArea,
 
     attributes,
   };
@@ -1052,13 +1084,8 @@ app.post(
 
       const model = process.env.OPENAI_AI_SUGGEST_MODEL || "gpt-5.4-mini";
 
-      const {
-        name,
-        description,
-        project,
-        brand,
-        deliveryMode,
-      } = req.body || {};
+      const { name, description, project, brand, deliveryMode } =
+        req.body || {};
 
       const fileArr = req.files?.file || [];
       const posterArr = req.files?.poster || [];
@@ -1329,6 +1356,11 @@ app.post(
         deliveryEnabled,
         physicalItemIncluded,
         officialItem,
+
+        // ✅ Local / offline service location
+        serviceCountry,
+        serviceCity,
+        serviceArea,
       } = req.body;
 
       const fileArr = req.files?.file || [];
@@ -1442,6 +1474,13 @@ app.post(
           ? "PHYSICAL_GOOD"
           : null);
 
+      const isLocalService = finalFulfillmentType === "LOCAL_SERVICE";
+
+      // ✅ Save local/offline service location only for LOCAL_SERVICE
+      const safeServiceCountry = isLocalService ? safeTrim(serviceCountry) : null;
+      const safeServiceCity = isLocalService ? safeTrim(serviceCity) : null;
+      const safeServiceArea = isLocalService ? safeTrim(serviceArea) : null;
+
       const suggestedMarketType = inferSuggestedMarketType({
         fulfillmentType: finalFulfillmentType,
         deliveryEnabled: safeDeliveryEnabled,
@@ -1480,6 +1519,18 @@ app.post(
               },
             ]
           : []),
+
+        // ✅ Local / offline service location attributes
+        ...(safeServiceCountry
+          ? [{ trait_type: "Service Country", value: safeServiceCountry }]
+          : []),
+        ...(safeServiceCity
+          ? [{ trait_type: "Service City", value: safeServiceCity }]
+          : []),
+        ...(safeServiceArea
+          ? [{ trait_type: "Service Area", value: safeServiceArea }]
+          : []),
+
         {
           trait_type: "Delivery Mode",
           value:
@@ -1534,6 +1585,11 @@ app.post(
 
         fulfillmentType: finalFulfillmentType,
         suggestedMarketType,
+
+        // ✅ Local / offline service location in IPFS metadata
+        serviceCountry: safeServiceCountry,
+        serviceCity: safeServiceCity,
+        serviceArea: safeServiceArea,
 
         proof: safeProofUrl,
         external_url: safeExternalUrl,
@@ -1590,6 +1646,12 @@ app.post(
           officialItem: metadata.officialItem,
           fulfillmentType: metadata.fulfillmentType,
           suggestedMarketType: metadata.suggestedMarketType,
+
+          // ✅ Local / offline service location in preview
+          serviceCountry: metadata.serviceCountry,
+          serviceCity: metadata.serviceCity,
+          serviceArea: metadata.serviceArea,
+
           kind: isVideo ? "video" : "image",
           media: isVideo ? metadata.animation_url : metadata.image,
           poster: isVideo ? metadata.image : null,
