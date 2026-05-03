@@ -470,20 +470,62 @@ const ABI_1155_READ = [
 /* =========================
    IPFS GATEWAY (for reading)
 ========================= */
-const IPFS_GATEWAY_ORIGIN = (
-  process.env.IPFS_GATEWAY_ORIGIN || "https://nftstorage.link"
-).replace(/\/$/, "");
+function normalizeIpfsGatewayOrigin(raw) {
+  const origin = String(raw || "https://nftstorage.link")
+    .trim()
+    .replace(/\/+$/, "");
+
+  // Keep env simple: https://nftstorage.link or https://gateway.pinata.cloud
+  // If someone accidentally sets .../ipfs or .../ipfs/, remove it here because
+  // ipfsToHttp() adds /ipfs/<cid> itself.
+  return origin.replace(/\/ipfs$/i, "");
+}
+
+const IPFS_GATEWAY_ORIGIN = normalizeIpfsGatewayOrigin(
+  process.env.IPFS_GATEWAY_ORIGIN ||
+    process.env.NEXT_PUBLIC_IPFS_GATEWAY ||
+    "https://nftstorage.link"
+);
+
+function isLikelyIpfsCidPath(v) {
+  const s = String(v || "").replace(/^\/+/, "");
+  return s.startsWith("Qm") || s.startsWith("bafy");
+}
+
+function fixLegacyGatewayUrl(rawUrl) {
+  try {
+    const url = new URL(String(rawUrl || ""));
+    const cleanPath = url.pathname.replace(/^\/+/, "");
+
+    if (!cleanPath || cleanPath.startsWith("ipfs/")) {
+      return rawUrl;
+    }
+
+    const isKnownGateway =
+      url.hostname === "nftstorage.link" ||
+      url.hostname === "gateway.pinata.cloud" ||
+      url.hostname === "ipfs.io" ||
+      url.hostname === "cloudflare-ipfs.com";
+
+    // Fix old cached URLs like:
+    // https://nftstorage.link/Qm... -> https://nftstorage.link/ipfs/Qm...
+    if (isKnownGateway && isLikelyIpfsCidPath(cleanPath)) {
+      return `${url.origin}/ipfs/${cleanPath}${url.search || ""}${
+        url.hash || ""
+      }`;
+    }
+  } catch {
+    // Not a valid URL. Keep original.
+  }
+
+  return rawUrl;
+}
 
 function ipfsToHttp(uri) {
   const u = String(uri || "").trim();
   if (!u) return "";
 
-  if (
-    u.startsWith("http://") ||
-    u.startsWith("https://") ||
-    u.startsWith("data:") ||
-    u.startsWith("blob:")
-  ) {
+  if (u.startsWith("data:") || u.startsWith("blob:")) {
     return u;
   }
 
@@ -493,9 +535,16 @@ function ipfsToHttp(uri) {
     return `${IPFS_GATEWAY_ORIGIN}/ipfs/${p}`;
   }
 
-  if (u.startsWith("/ipfs/")) return `${IPFS_GATEWAY_ORIGIN}${u}`;
-  if (u.startsWith("Qm") || u.startsWith("bafy")) {
-    return `${IPFS_GATEWAY_ORIGIN}/ipfs/${u}`;
+  if (u.startsWith("/ipfs/")) {
+    return `${IPFS_GATEWAY_ORIGIN}${u}`;
+  }
+
+  if (isLikelyIpfsCidPath(u)) {
+    return `${IPFS_GATEWAY_ORIGIN}/ipfs/${u.replace(/^\/+/, "")}`;
+  }
+
+  if (u.startsWith("http://") || u.startsWith("https://")) {
+    return fixLegacyGatewayUrl(u);
   }
 
   return u;
