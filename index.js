@@ -171,8 +171,8 @@ const AI_ALLOWED_CATEGORIES = [
   "Sports & Outdoor",
   "Automotive",
   "Pet Products & Services",
-  "Collectible Product",
-  "Other Product",
+  "Collectible Good",
+  "Other Good",
   "Other Service",
   "Other",
 ];
@@ -326,8 +326,22 @@ function normalizeCategoryValue(v) {
     return "Pet Products & Services";
   }
 
-  if (s === "collectible product") return "Collectible Product";
-  if (s === "other product" || s === "product") return "Other Product";
+  if (
+    s === "collectible product" ||
+    s === "collectible good" ||
+    s === "collectible goods"
+  ) {
+    return "Collectible Good";
+  }
+  if (
+    s === "other product" ||
+    s === "product" ||
+    s === "other good" ||
+    s === "good" ||
+    s === "goods"
+  ) {
+    return "Other Good";
+  }
   if (s === "other service" || s === "service") return "Other Service";
 
   return "Other";
@@ -1433,43 +1447,57 @@ app.post(
           .json({ status: "error", message: "Poster must be an image file" });
       }
 
-      /* ========= 1️⃣ Upload main file ========= */
-      const mediaUri = await pinFileToIpfs(
+      /* ========= 1️⃣ Upload main file + poster IN PARALLEL ========= */
+      // For video uploads, the user-supplied poster (if any) can pin
+      // simultaneously with the main video file. ffmpeg-extracted posters
+      // depend on the video buffer being decoded first, so those still go
+      // sequentially after the video upload kicks off — but we still race
+      // the actual Pinata POSTs.
+
+      const mediaUriPromise = pinFileToIpfs(
         file.buffer,
         file.originalname || "media",
         process.env.PINATA_JWT
       );
 
-      /* ========= 2️⃣ Poster logic (video) ========= */
-      let posterUri = null;
+      let posterUriPromise = Promise.resolve(null);
 
       if (isVideo) {
         if (posterFile && isPosterOk) {
-          posterUri = await pinFileToIpfs(
+          posterUriPromise = pinFileToIpfs(
             posterFile.buffer,
             posterFile.originalname || "poster",
             process.env.PINATA_JWT
           );
         } else {
-          try {
-            const posterBuf = await makePosterFromVideo(file.buffer);
-            posterUri = await pinFileToIpfs(
-              posterBuf,
-              "poster.jpg",
-              process.env.PINATA_JWT
-            );
-          } catch {
-            posterUri = process.env.DEFAULT_VIDEO_POSTER || null;
-          }
+          // ffmpeg poster extraction must complete before pinning;
+          // fall back to DEFAULT_VIDEO_POSTER if extraction fails.
+          posterUriPromise = (async () => {
+            try {
+              const posterBuf = await makePosterFromVideo(file.buffer);
+              return await pinFileToIpfs(
+                posterBuf,
+                "poster.jpg",
+                process.env.PINATA_JWT
+              );
+            } catch {
+              return process.env.DEFAULT_VIDEO_POSTER || null;
+            }
+          })();
         }
+      }
 
-        if (!posterUri) {
-          return res.status(400).json({
-            status: "error",
-            message:
-              "Poster required for video. Upload poster image or set DEFAULT_VIDEO_POSTER env (ipfs://...).",
-          });
-        }
+      const [mediaUri, posterUri] = await Promise.all([
+        mediaUriPromise,
+        posterUriPromise,
+      ]);
+
+      if (isVideo && !posterUri) {
+        return res.status(400).json({
+          status: "error",
+          message:
+            "Poster required for video. Upload poster image or set DEFAULT_VIDEO_POSTER env (ipfs://...).",
+        });
       }
 
       /* ========= 3️⃣ Build METADATA ========= */
