@@ -54,7 +54,8 @@ function resolveContractAlias(raw) {
   }
 
   if (v === "delivery") {
-    return REALIFE_1155_DELIVERY_CONTRACT || "";
+    // Legacy alias only. New public create flow uses the standard ERC-1155 contract.
+    return REALIFE_1155_STANDARD_CONTRACT || "";
   }
 
   if (isAddressLike(v)) return norm(v);
@@ -386,6 +387,7 @@ function normalizeAiSuggestion(raw, deliveryMode = "none") {
   const subcategory = safeTrim(raw?.subcategory);
   const title = safeTrim(raw?.title);
   const brand = safeTrim(raw?.brand);
+  const description = safeTrim(raw?.description);
   const reasoning = safeTrim(raw?.reasoning);
 
   let fulfillmentType =
@@ -423,6 +425,7 @@ function normalizeAiSuggestion(raw, deliveryMode = "none") {
     subcategory,
     title,
     brand,
+    description,
     fulfillmentType,
     suggestedMarketType,
     reasoning,
@@ -434,7 +437,7 @@ function normalizeAiSuggestion(raw, deliveryMode = "none") {
    ABI (READ-ONLY) — 1155 ONLY
    Works for:
    - Realife1155New
-   - Realife1155Delivery
+   - legacy metadata-compatible ERC-1155 contracts
 ========================= */
 const ABI_1155_READ = [
   {
@@ -647,16 +650,7 @@ const REALIFE_1155_STANDARD_CONTRACT = norm(
     ""
 );
 
-const REALIFE_1155_DELIVERY_CONTRACT = norm(
-  process.env.REALIFE_1155_DELIVERY_CONTRACT ||
-    process.env.NEXT_PUBLIC_REALIFE_1155_DELIVERY_CONTRACT ||
-    ""
-);
-
-const KNOWN_1155_CONTRACTS = uniqueStrings([
-  REALIFE_1155_STANDARD_CONTRACT,
-  REALIFE_1155_DELIVERY_CONTRACT,
-]);
+const KNOWN_1155_CONTRACTS = uniqueStrings([REALIFE_1155_STANDARD_CONTRACT]);
 
 async function readContractSafe(address, functionName, args, fallback = null) {
   try {
@@ -727,10 +721,7 @@ async function resolve1155ContractForToken(tokenId, preferredContractRaw = "") {
     return KNOWN_1155_CONTRACTS[0];
   }
 
-  const candidates = uniqueStrings([
-    REALIFE_1155_STANDARD_CONTRACT,
-    REALIFE_1155_DELIVERY_CONTRACT,
-  ]);
+  const candidates = uniqueStrings([REALIFE_1155_STANDARD_CONTRACT]);
 
   for (const c of candidates) {
     if (!c) continue;
@@ -738,7 +729,7 @@ async function resolve1155ContractForToken(tokenId, preferredContractRaw = "") {
     if (probe.exists) return c;
   }
 
-  return REALIFE_1155_STANDARD_CONTRACT || REALIFE_1155_DELIVERY_CONTRACT || "";
+  return REALIFE_1155_STANDARD_CONTRACT || "";
 }
 
 async function build1155MetadataResponse(contract1155, tokenId) {
@@ -1041,7 +1032,7 @@ async function handleMetadata1155(req, res, explicitContractRaw = "") {
       return res.status(500).json({
         status: "error",
         message:
-          "No 1155 contract configured. Set REALIFE_1155_NEW_CONTRACT and/or REALIFE_1155_DELIVERY_CONTRACT",
+          "No 1155 contract configured. Set REALIFE_1155_NEW_CONTRACT",
       });
     }
 
@@ -1080,7 +1071,7 @@ app.get("/", (_req, res) => {
     rpcUrl: RPC_URL,
     contracts: {
       standard1155: REALIFE_1155_STANDARD_CONTRACT || null,
-      delivery1155: REALIFE_1155_DELIVERY_CONTRACT || null,
+      unified1155: REALIFE_1155_STANDARD_CONTRACT || null,
     },
     aiSuggest: {
       enabled: Boolean(process.env.OPENAI_API_KEY),
@@ -1219,23 +1210,27 @@ ${AI_ALLOWED_CATEGORIES.map((x) => `- ${x}`).join("\n")}
 
 6. title should be short and marketplace-friendly.
 
-7. fulfillmentType:
+7. description should be a short marketplace description in 1-3 sentences.
+   Explain what the buyer gets and any useful delivery/service details.
+   Do not overpromise, do not mention investment value, and do not promise guaranteed resale or profit.
+
+8. fulfillmentType:
    - "PHYSICAL_GOOD" for real physical products / merch / packaged goods / objects
    - "DIGITAL_SERVICE" for websites, branding, design, automation, digital work, travel plans, documents
    - "ONLINE_SESSION" for coaching, consultation, lesson, training, remote calls
    - "LOCAL_SERVICE" for repair, local visits, in-person service, offline work, tours, event entry
    - null if it looks like a normal collectible/art NFT
 
-8. suggestedMarketType:
+9. suggestedMarketType:
    - "protected" if fulfillmentType is not null
    - "standard" if collectible
 
-9. If the current deliveryMode from the user is "delivery", force:
+10. If the current deliveryMode from the user is "delivery", force:
    - path = "physical_product"
    - fulfillmentType = "PHYSICAL_GOOD"
    - suggestedMarketType = "protected"
 
-10. Prefer practical marketplace classification over artistic interpretation.
+11. Prefer practical marketplace classification over artistic interpretation.
 `;
 
       const userText = [
@@ -1266,6 +1261,7 @@ ${AI_ALLOWED_CATEGORIES.map((x) => `- ${x}`).join("\n")}
           subcategory: { type: ["string", "null"] },
           title: { type: ["string", "null"] },
           brand: { type: ["string", "null"] },
+          description: { type: ["string", "null"] },
           fulfillmentType: {
             type: ["string", "null"],
             enum: [
@@ -1294,6 +1290,7 @@ ${AI_ALLOWED_CATEGORIES.map((x) => `- ${x}`).join("\n")}
           "subcategory",
           "title",
           "brand",
+          "description",
           "fulfillmentType",
           "suggestedMarketType",
           "reasoning",
@@ -1393,6 +1390,7 @@ app.post(
         brand,
         itemType,
         fulfillmentType,
+        offerType,
         deliveryMode,
         supply,
         proofUrl,
@@ -1484,10 +1482,12 @@ app.post(
       const safeDescription = String(description || "").trim();
       const safeCategory = String(category || "Other").trim();
       const safeSubcategory = safeTrim(subcategory);
-      const safeProject = String(project || "Realife").trim();
+      // Public create flow uses Realife as the platform project.
+      // Seller identity belongs in `brand` / `brandProject`, not in a project selector.
+      const safeProject = "Realife";
 
       const safeBrandProject = String(
-        brandProject || safeProject || "Realife"
+        brandProject || brand || safeProject || "Realife"
       ).trim();
       const safeBrand = String(brand || "").trim() || null;
 
@@ -1502,8 +1502,11 @@ app.post(
       const safeExternalUrl = String(externalUrl || proofUrl || "").trim() || null;
       const safeVertical = String(vertical || "").trim() || null;
 
+      const safeOfferType = String(offerType || "").trim().toLowerCase() || null;
+
       const safeDeliveryMode =
-        String(deliveryMode || "").trim().toLowerCase() === "delivery"
+        String(deliveryMode || "").trim().toLowerCase() === "delivery" ||
+        safeOfferType === "physical_product"
           ? "delivery"
           : "none";
 
@@ -1627,6 +1630,7 @@ app.post(
         supply: safeSupply,
 
         vertical: safeVertical,
+        offerType: safeOfferType,
         deliveryMode: safeDeliveryMode,
         deliveryEnabled: safeDeliveryEnabled,
         physicalItemIncluded: safePhysicalItemIncluded,
@@ -1689,6 +1693,7 @@ app.post(
           drink: metadata.drink,
           rarity: metadata.rarity,
           vertical: metadata.vertical,
+          offerType: metadata.offerType,
           deliveryMode: metadata.deliveryMode,
           deliveryEnabled: metadata.deliveryEnabled,
           physicalItemIncluded: metadata.physicalItemIncluded,
@@ -1737,8 +1742,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`accurate-art running on port ${PORT}`);
   console.log("[1155 contracts]", {
-    standard: REALIFE_1155_STANDARD_CONTRACT || null,
-    delivery: REALIFE_1155_DELIVERY_CONTRACT || null,
+    unified1155: REALIFE_1155_STANDARD_CONTRACT || null,
   });
   console.log("[ai-suggest]", {
     enabled: Boolean(process.env.OPENAI_API_KEY),
