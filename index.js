@@ -53,11 +53,6 @@ function resolveContractAlias(raw) {
     return REALIFE_1155_STANDARD_CONTRACT || "";
   }
 
-  if (v === "delivery") {
-    // Legacy alias only. New public create flow uses the standard ERC-1155 contract.
-    return REALIFE_1155_STANDARD_CONTRACT || "";
-  }
-
   if (isAddressLike(v)) return norm(v);
   return "";
 }
