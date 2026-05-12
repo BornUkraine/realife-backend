@@ -659,6 +659,25 @@ const REALIFE_1155_STANDARD_CONTRACT = norm(
     ""
 );
 
+const BASE_SEPOLIA_USDC_ADDRESS = norm(
+  process.env.BASE_SEPOLIA_USDC_ADDRESS ||
+    process.env.NEXT_PUBLIC_BASE_SEPOLIA_USDC_ADDRESS ||
+    "0x036CbD53842c5426634e7929541eC2318f3dCF7e"
+);
+
+const REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT = norm(
+  process.env.REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT ||
+    process.env.NEXT_PUBLIC_REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT ||
+    "0x67e7472E48083DE3Ec8416CB8349448B1B39f1ae"
+);
+
+const PROTECTED_USDC_PAYMENT = {
+  symbol: "USDC",
+  decimals: 6,
+  tokenAddress: BASE_SEPOLIA_USDC_ADDRESS,
+  marketplaceAddress: REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT,
+};
+
 const KNOWN_1155_CONTRACTS = uniqueStrings([REALIFE_1155_STANDARD_CONTRACT]);
 
 async function readContractSafe(address, functionName, args, fallback = null) {
@@ -814,6 +833,10 @@ async function build1155MetadataResponse(contract1155, tokenId) {
   let external_url = null;
   let fulfillmentType = null;
   let suggestedMarketType = null;
+  let marketplaceContract = null;
+  let paymentTokenAddress = null;
+  let paymentSymbol = null;
+  let paymentDecimals = null;
 
   // ✅ Local / offline service location
   let serviceCountry = null;
@@ -865,6 +888,11 @@ async function build1155MetadataResponse(contract1155, tokenId) {
 
       suggestedMarketType = safeTrim(originalMetadata.data?.suggestedMarketType);
 
+      marketplaceContract = safeTrim(originalMetadata.data?.marketplaceContract);
+      paymentTokenAddress = safeTrim(originalMetadata.data?.paymentTokenAddress);
+      paymentSymbol = safeTrim(originalMetadata.data?.paymentSymbol);
+      paymentDecimals = Number(originalMetadata.data?.paymentDecimals) || null;
+
       // ✅ Read local/offline service location from metadata
       serviceCountry = safeTrim(originalMetadata.data?.serviceCountry);
       serviceCity = safeTrim(originalMetadata.data?.serviceCity);
@@ -911,6 +939,15 @@ async function build1155MetadataResponse(contract1155, tokenId) {
       deliveryEnabled,
       physicalItemIncluded,
     });
+  }
+
+  if (suggestedMarketType === "protected") {
+    marketplaceContract =
+      marketplaceContract || PROTECTED_USDC_PAYMENT.marketplaceAddress || null;
+    paymentTokenAddress =
+      paymentTokenAddress || PROTECTED_USDC_PAYMENT.tokenAddress || null;
+    paymentSymbol = paymentSymbol || PROTECTED_USDC_PAYMENT.symbol;
+    paymentDecimals = paymentDecimals || PROTECTED_USDC_PAYMENT.decimals;
   }
 
   const block = await client.getBlock();
@@ -966,6 +1003,22 @@ async function build1155MetadataResponse(contract1155, tokenId) {
       trait_type: "Suggested Market",
       value: suggestedMarketType === "protected" ? "Protected" : "Standard",
     },
+    ...(suggestedMarketType === "protected"
+      ? [
+          { trait_type: "Protected Payment", value: paymentSymbol || "USDC" },
+          ...(paymentTokenAddress
+            ? [{ trait_type: "Payment Token", value: paymentTokenAddress }]
+            : []),
+          ...(marketplaceContract
+            ? [
+                {
+                  trait_type: "Protected Marketplace",
+                  value: marketplaceContract,
+                },
+              ]
+            : []),
+        ]
+      : []),
     ...(isUnique ? [{ trait_type: "Unique", value: "Yes" }] : []),
     ...originalAttributes,
     { trait_type: "Contract", value: contract1155 },
@@ -1006,6 +1059,10 @@ async function build1155MetadataResponse(contract1155, tokenId) {
 
     fulfillmentType,
     suggestedMarketType,
+    marketplaceContract,
+    paymentTokenAddress,
+    paymentSymbol,
+    paymentDecimals,
 
     // ✅ Local / offline service location
     serviceCountry,
@@ -1081,6 +1138,13 @@ app.get("/", (_req, res) => {
     contracts: {
       standard1155: REALIFE_1155_STANDARD_CONTRACT || null,
       unified1155: REALIFE_1155_STANDARD_CONTRACT || null,
+      protectedMarketplaceUsdc:
+        REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT || null,
+    },
+    protectedPayment: {
+      symbol: PROTECTED_USDC_PAYMENT.symbol,
+      decimals: PROTECTED_USDC_PAYMENT.decimals,
+      tokenAddress: PROTECTED_USDC_PAYMENT.tokenAddress || null,
     },
     aiSuggest: {
       enabled: Boolean(process.env.OPENAI_API_KEY),
@@ -1417,6 +1481,12 @@ app.post(
         serviceCountry,
         serviceCity,
         serviceArea,
+
+        // ✅ Protected USDC marketplace/payment hints from frontend
+        marketplaceContract,
+        paymentTokenAddress,
+        paymentSymbol,
+        paymentDecimals,
       } = req.body;
 
       const fileArr = req.files?.file || [];
@@ -1562,6 +1632,28 @@ app.post(
         physicalItemIncluded: safePhysicalItemIncluded,
       });
 
+      const safeMarketplaceContract =
+        suggestedMarketType === "protected"
+          ? safeTrim(marketplaceContract) ||
+            PROTECTED_USDC_PAYMENT.marketplaceAddress ||
+            null
+          : null;
+
+      const safePaymentTokenAddress =
+        suggestedMarketType === "protected"
+          ? safeTrim(paymentTokenAddress) || PROTECTED_USDC_PAYMENT.tokenAddress || null
+          : null;
+
+      const safePaymentSymbol =
+        suggestedMarketType === "protected"
+          ? safeTrim(paymentSymbol) || PROTECTED_USDC_PAYMENT.symbol
+          : null;
+
+      const safePaymentDecimals =
+        suggestedMarketType === "protected"
+          ? Number(paymentDecimals) || PROTECTED_USDC_PAYMENT.decimals
+          : null;
+
       const shouldIncludeDeliveryAttributes =
         safeVertical === "store" ||
         safeVertical === "cafe" ||
@@ -1633,6 +1725,25 @@ app.post(
           trait_type: "Suggested Market",
           value: suggestedMarketType === "protected" ? "Protected" : "Standard",
         },
+        ...(suggestedMarketType === "protected"
+          ? [
+              {
+                trait_type: "Protected Payment",
+                value: safePaymentSymbol || "USDC",
+              },
+              ...(safePaymentTokenAddress
+                ? [{ trait_type: "Payment Token", value: safePaymentTokenAddress }]
+                : []),
+              ...(safeMarketplaceContract
+                ? [
+                    {
+                      trait_type: "Protected Marketplace",
+                      value: safeMarketplaceContract,
+                    },
+                  ]
+                : []),
+            ]
+          : []),
         { trait_type: "Supply", value: String(safeSupply) },
       ];
 
@@ -1661,6 +1772,10 @@ app.post(
 
         fulfillmentType: finalFulfillmentType,
         suggestedMarketType,
+        marketplaceContract: safeMarketplaceContract,
+        paymentTokenAddress: safePaymentTokenAddress,
+        paymentSymbol: safePaymentSymbol,
+        paymentDecimals: safePaymentDecimals,
 
         // ✅ Local / offline service location in IPFS metadata
         serviceCountry: safeServiceCountry,
@@ -1723,6 +1838,10 @@ app.post(
           officialItem: metadata.officialItem,
           fulfillmentType: metadata.fulfillmentType,
           suggestedMarketType: metadata.suggestedMarketType,
+          marketplaceContract: metadata.marketplaceContract,
+          paymentTokenAddress: metadata.paymentTokenAddress,
+          paymentSymbol: metadata.paymentSymbol,
+          paymentDecimals: metadata.paymentDecimals,
 
           // ✅ Local / offline service location in preview
           serviceCountry: metadata.serviceCountry,
@@ -1766,6 +1885,9 @@ app.listen(PORT, () => {
   console.log(`accurate-art running on port ${PORT}`);
   console.log("[1155 contracts]", {
     unified1155: REALIFE_1155_STANDARD_CONTRACT || null,
+    protectedMarketplaceUsdc:
+      REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT || null,
+    usdc: BASE_SEPOLIA_USDC_ADDRESS || null,
   });
   console.log("[ai-suggest]", {
     enabled: Boolean(process.env.OPENAI_API_KEY),
