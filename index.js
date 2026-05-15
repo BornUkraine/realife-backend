@@ -53,6 +53,17 @@ function resolveContractAlias(raw) {
     return REALIFE_1155_STANDARD_CONTRACT || "";
   }
 
+  if (
+    v === "protected" ||
+    v === "protected1155" ||
+    v === "protected_1155" ||
+    v === "sbt" ||
+    v === "receipt" ||
+    v === "realifeprotected1155"
+  ) {
+    return REALIFE_1155_PROTECTED_CONTRACT || "";
+  }
+
   if (isAddressLike(v)) return norm(v);
   return "";
 }
@@ -659,6 +670,15 @@ const REALIFE_1155_STANDARD_CONTRACT = norm(
     ""
 );
 
+// ✅ New protected mint / receipt / SBT ERC-1155 contract.
+// Standard NFT mint stays on REALIFE_1155_STANDARD_CONTRACT.
+// Protected goods/services mint goes to this contract.
+const REALIFE_1155_PROTECTED_CONTRACT = norm(
+  process.env.REALIFE_PROTECTED_1155_ADDRESS ||
+    process.env.NEXT_PUBLIC_REALIFE_PROTECTED_1155_ADDRESS ||
+    "0xd73A0D6d32485d1DDa30A488a4d9f9A575c4EE19"
+);
+
 const BASE_SEPOLIA_USDC_ADDRESS = norm(
   process.env.BASE_SEPOLIA_USDC_ADDRESS ||
     process.env.NEXT_PUBLIC_BASE_SEPOLIA_USDC_ADDRESS ||
@@ -668,7 +688,7 @@ const BASE_SEPOLIA_USDC_ADDRESS = norm(
 const REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT = norm(
   process.env.REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT ||
     process.env.NEXT_PUBLIC_REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT ||
-    "0x67e7472E48083DE3Ec8416CB8349448B1B39f1ae"
+    "0x1e40d20322617e6118F5838092A122a87F97cA75"
 );
 
 const PROTECTED_USDC_PAYMENT = {
@@ -678,7 +698,10 @@ const PROTECTED_USDC_PAYMENT = {
   marketplaceAddress: REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT,
 };
 
-const KNOWN_1155_CONTRACTS = uniqueStrings([REALIFE_1155_STANDARD_CONTRACT]);
+const KNOWN_1155_CONTRACTS = uniqueStrings([
+  REALIFE_1155_STANDARD_CONTRACT,
+  REALIFE_1155_PROTECTED_CONTRACT,
+]);
 
 async function readContractSafe(address, functionName, args, fallback = null) {
   try {
@@ -749,7 +772,10 @@ async function resolve1155ContractForToken(tokenId, preferredContractRaw = "") {
     return KNOWN_1155_CONTRACTS[0];
   }
 
-  const candidates = uniqueStrings([REALIFE_1155_STANDARD_CONTRACT]);
+  const candidates = uniqueStrings([
+    REALIFE_1155_STANDARD_CONTRACT,
+    REALIFE_1155_PROTECTED_CONTRACT,
+  ]);
 
   for (const c of candidates) {
     if (!c) continue;
@@ -757,7 +783,7 @@ async function resolve1155ContractForToken(tokenId, preferredContractRaw = "") {
     if (probe.exists) return c;
   }
 
-  return REALIFE_1155_STANDARD_CONTRACT || "";
+  return REALIFE_1155_STANDARD_CONTRACT || REALIFE_1155_PROTECTED_CONTRACT || "";
 }
 
 async function build1155MetadataResponse(contract1155, tokenId) {
@@ -952,6 +978,12 @@ async function build1155MetadataResponse(contract1155, tokenId) {
 
   const block = await client.getBlock();
 
+  const normalizedContract1155 = norm(contract1155);
+  const mintModeFromContract =
+    normalizedContract1155 && normalizedContract1155 === REALIFE_1155_PROTECTED_CONTRACT
+      ? "protected"
+      : "standard";
+
   const imageHttp = image ? ipfsToHttp(image) : null;
   const animHttp = animation_url ? ipfsToHttp(animation_url) : null;
 
@@ -1021,6 +1053,7 @@ async function build1155MetadataResponse(contract1155, tokenId) {
       : []),
     ...(isUnique ? [{ trait_type: "Unique", value: "Yes" }] : []),
     ...originalAttributes,
+    { trait_type: "Mint Mode", value: mintModeFromContract === "protected" ? "Protected" : "Standard" },
     { trait_type: "Contract", value: contract1155 },
     {
       trait_type: "Last Updated",
@@ -1030,6 +1063,8 @@ async function build1155MetadataResponse(contract1155, tokenId) {
 
   return {
     contract: contract1155,
+    contract1155,
+    mintMode: mintModeFromContract,
     tokenId: tokenId.toString(),
     tokenUri: tokenUri || null,
 
@@ -1087,7 +1122,10 @@ async function handleMetadata1155(req, res, explicitContractRaw = "") {
     }
 
     const queryContract = String(req.query?.contract || "").trim();
-    const preferredContract = explicitContractRaw || queryContract || "";
+    const queryMintContract = String(req.query?.mintContract || "").trim();
+    const queryMarketType = String(req.query?.marketType || "").trim();
+    const preferredContract =
+      explicitContractRaw || queryContract || queryMintContract || queryMarketType || "";
 
     const contract1155 = await resolve1155ContractForToken(
       tokenId,
@@ -1098,7 +1136,7 @@ async function handleMetadata1155(req, res, explicitContractRaw = "") {
       return res.status(500).json({
         status: "error",
         message:
-          "No 1155 contract configured. Set REALIFE_1155_NEW_CONTRACT",
+          "No 1155 contract configured. Set REALIFE_1155_NEW_CONTRACT and/or REALIFE_PROTECTED_1155_ADDRESS",
       });
     }
 
@@ -1137,7 +1175,9 @@ app.get("/", (_req, res) => {
     rpcUrl: RPC_URL,
     contracts: {
       standard1155: REALIFE_1155_STANDARD_CONTRACT || null,
+      protected1155: REALIFE_1155_PROTECTED_CONTRACT || null,
       unified1155: REALIFE_1155_STANDARD_CONTRACT || null,
+      known1155: KNOWN_1155_CONTRACTS,
       protectedMarketplaceUsdc:
         REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT || null,
     },
@@ -1654,6 +1694,15 @@ app.post(
           ? Number(paymentDecimals) || PROTECTED_USDC_PAYMENT.decimals
           : null;
 
+      // ✅ Backend tells the frontend which mint contract should be used.
+      // Standard collectible/normal NFT -> old standard ERC-1155.
+      // Protected goods/services -> new RealifeProtected1155 ERC-1155/SBT receipt contract.
+      const mintMode = suggestedMarketType === "protected" ? "protected" : "standard";
+      const targetMintContract =
+        mintMode === "protected"
+          ? REALIFE_1155_PROTECTED_CONTRACT || null
+          : REALIFE_1155_STANDARD_CONTRACT || null;
+
       const shouldIncludeDeliveryAttributes =
         safeVertical === "store" ||
         safeVertical === "cafe" ||
@@ -1744,6 +1793,10 @@ app.post(
                 : []),
             ]
           : []),
+        { trait_type: "Mint Mode", value: mintMode === "protected" ? "Protected" : "Standard" },
+        ...(targetMintContract
+          ? [{ trait_type: "Mint Contract", value: targetMintContract }]
+          : []),
         { trait_type: "Supply", value: String(safeSupply) },
       ];
 
@@ -1772,6 +1825,9 @@ app.post(
 
         fulfillmentType: finalFulfillmentType,
         suggestedMarketType,
+        mintMode,
+        mintContract: targetMintContract,
+        contract1155: targetMintContract,
         marketplaceContract: safeMarketplaceContract,
         paymentTokenAddress: safePaymentTokenAddress,
         paymentSymbol: safePaymentSymbol,
@@ -1838,6 +1894,9 @@ app.post(
           officialItem: metadata.officialItem,
           fulfillmentType: metadata.fulfillmentType,
           suggestedMarketType: metadata.suggestedMarketType,
+          mintMode: metadata.mintMode,
+          mintContract: metadata.mintContract,
+          contract1155: metadata.contract1155,
           marketplaceContract: metadata.marketplaceContract,
           paymentTokenAddress: metadata.paymentTokenAddress,
           paymentSymbol: metadata.paymentSymbol,
@@ -1884,7 +1943,10 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`accurate-art running on port ${PORT}`);
   console.log("[1155 contracts]", {
+    standard1155: REALIFE_1155_STANDARD_CONTRACT || null,
+    protected1155: REALIFE_1155_PROTECTED_CONTRACT || null,
     unified1155: REALIFE_1155_STANDARD_CONTRACT || null,
+    known1155: KNOWN_1155_CONTRACTS,
     protectedMarketplaceUsdc:
       REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT || null,
     usdc: BASE_SEPOLIA_USDC_ADDRESS || null,
