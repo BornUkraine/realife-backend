@@ -670,13 +670,13 @@ const REALIFE_1155_STANDARD_CONTRACT = norm(
     ""
 );
 
-// ✅ New protected mint / receipt / SBT ERC-1155 contract.
+// ✅ New quantity/inventory protected ERC-1155 contract.
 // Standard NFT mint stays on REALIFE_1155_STANDARD_CONTRACT.
-// Protected goods/services mint goes to this contract.
+// Protected goods/services mint goes to this contract and supports supply > 1.
 const REALIFE_1155_PROTECTED_CONTRACT = norm(
   process.env.REALIFE_PROTECTED_1155_ADDRESS ||
     process.env.NEXT_PUBLIC_REALIFE_PROTECTED_1155_ADDRESS ||
-    "0xd73A0D6d32485d1DDa30A488a4d9f9A575c4EE19"
+    "0xf67a0c7209445Ae176C9Be1081814Ce37dD0fA7c"
 );
 
 const BASE_SEPOLIA_USDC_ADDRESS = norm(
@@ -688,7 +688,7 @@ const BASE_SEPOLIA_USDC_ADDRESS = norm(
 const REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT = norm(
   process.env.REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT ||
     process.env.NEXT_PUBLIC_REALIFE_PROTECTED_MARKETPLACE_USDC_CONTRACT ||
-    "0x1e40d20322617e6118F5838092A122a87F97cA75"
+    "0x20F1128847028cdcBBcB0012Fc915737fCCd4e9D"
 );
 
 const PROTECTED_USDC_PAYMENT = {
@@ -1630,7 +1630,7 @@ app.post(
       const safeItemType = String(itemType || "").trim() || safeItem || null;
 
       const safeRarity = String(rarity || "").trim();
-      const safeSupply = Number(supply) || 1;
+      const safeSupply = Math.max(1, Math.floor(Number(supply) || 1));
       const safeProofUrl = String(proofUrl || "").trim() || null;
       const safeExternalUrl = String(externalUrl || proofUrl || "").trim() || null;
       const safeVertical = String(vertical || "").trim() || null;
