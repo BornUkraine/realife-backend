@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import multer from "multer";
+import Busboy from "busboy";
 import axios from "axios";
 import FormData from "form-data";
 import { createPublicClient, http } from "viem";
@@ -1157,12 +1157,132 @@ app.use(cors());
 app.use(express.json());
 
 /* =========================
-   MULTER (memory storage)
+   MULTIPART UPLOADS
 ========================= */
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 100 * 1024 * 1024 },
-});
+const MAX_UPLOAD_FILE_BYTES = 100 * 1024 * 1024;
+const MAX_UPLOAD_FIELDS = 60;
+
+function multipartFields(definitions) {
+  const allowed = new Map(
+    definitions.map(({ name, maxCount = 1 }) => [name, maxCount])
+  );
+
+  return (req, res, next) => {
+    let parser;
+    try {
+      parser = Busboy({
+        headers: req.headers,
+        limits: {
+          fileSize: MAX_UPLOAD_FILE_BYTES,
+          files: Array.from(allowed.values()).reduce(
+            (sum, count) => sum + count,
+            0
+          ),
+          fields: MAX_UPLOAD_FIELDS,
+          parts:
+            MAX_UPLOAD_FIELDS +
+            Array.from(allowed.values()).reduce(
+              (sum, count) => sum + count,
+              0
+            ),
+          fieldSize: 64 * 1024,
+        },
+      });
+    } catch {
+      return res.status(400).json({
+        status: "error",
+        message: "Expected multipart/form-data",
+      });
+    }
+
+    const body = Object.create(null);
+    const files = Object.create(null);
+    let uploadError = null;
+    let parserError = null;
+
+    parser.on("field", (name, value, info) => {
+      if (
+        info?.valueTruncated ||
+        name === "__proto__" ||
+        name === "prototype" ||
+        name === "constructor"
+      ) {
+        uploadError = {
+          status: 400,
+          message: "Invalid multipart field",
+        };
+        return;
+      }
+      body[name] = value;
+    });
+
+    parser.on("file", (name, stream, info) => {
+      const maxCount = allowed.get(name);
+      if (!maxCount || (files[name]?.length || 0) >= maxCount) {
+        stream.resume();
+        return;
+      }
+
+      const chunks = [];
+      let truncated = false;
+
+      stream.on("limit", () => {
+        truncated = true;
+        uploadError = {
+          status: 413,
+          message: `File exceeds ${MAX_UPLOAD_FILE_BYTES} bytes`,
+        };
+      });
+      stream.on("data", (chunk) => {
+        if (!truncated) chunks.push(chunk);
+      });
+      stream.on("end", () => {
+        if (truncated) return;
+        files[name] ||= [];
+        files[name].push({
+          buffer: Buffer.concat(chunks),
+          originalname: String(info?.filename || "upload"),
+          mimetype: String(
+            info?.mimeType || "application/octet-stream"
+          ).toLowerCase(),
+        });
+      });
+    });
+
+    parser.on("filesLimit", () => {
+      uploadError = { status: 413, message: "Too many uploaded files" };
+    });
+    parser.on("fieldsLimit", () => {
+      uploadError = { status: 413, message: "Too many multipart fields" };
+    });
+    parser.on("partsLimit", () => {
+      uploadError = { status: 413, message: "Too many multipart parts" };
+    });
+    parser.on("error", (error) => {
+      parserError = error;
+    });
+    parser.on("close", () => {
+      if (res.headersSent) return;
+      if (parserError) {
+        return res.status(400).json({
+          status: "error",
+          message: "Invalid multipart payload",
+        });
+      }
+      if (uploadError) {
+        return res
+          .status(uploadError.status)
+          .json({ status: "error", message: uploadError.message });
+      }
+
+      req.body = body;
+      req.files = files;
+      return next();
+    });
+
+    req.pipe(parser);
+  };
+}
 
 /* =========================
    HEALTH CHECK
@@ -1222,7 +1342,7 @@ async function pinFileToIpfs(buffer, filename, jwt) {
 ========================= */
 app.post(
   "/api/ai-suggest",
-  upload.fields([
+  multipartFields([
     { name: "file", maxCount: 1 },
     { name: "poster", maxCount: 1 },
   ]),
@@ -1487,7 +1607,7 @@ ${AI_ALLOWED_CATEGORIES.map((x) => `- ${x}`).join("\n")}
 ========================= */
 app.post(
   "/api/mint/prepare",
-  upload.fields([
+  multipartFields([
     { name: "file", maxCount: 1 },
     { name: "poster", maxCount: 1 },
   ]),
